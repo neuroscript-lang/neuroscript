@@ -142,6 +142,7 @@ impl<'a> Lexer<'a> {
 
         loop {
             let tok = self.next_token()?;
+            // println!("DEBUG: Token: {:?}", tok);
             let is_eof = tok.kind == TokenKind::Eof;
             tokens.push(tok);
             if is_eof {
@@ -181,6 +182,7 @@ impl<'a> Lexer<'a> {
         let start_col = self.col;
 
         let Some(ch) = self.advance() else {
+            // println!("DEBUG: Lexer reached EOF at pos {}", self.pos);
             // EOF - emit any remaining dedents
             while self.indent_stack.len() > 1 {
                 self.indent_stack.pop();

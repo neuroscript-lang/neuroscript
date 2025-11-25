@@ -449,7 +449,7 @@ impl Parser {
         loop {
             let next = self.endpoint()?;
             connections.push(Connection {
-                source: prev,
+                source: prev.clone(),
                 destination: next.clone(),
             });
             prev = next;
@@ -461,7 +461,10 @@ impl Parser {
             }
         }
 
-        self.expect(&TokenKind::Newline)?;
+        // If the last endpoint was a match expression, it already consumed the newline/block
+        if !matches!(prev, Endpoint::Match(_)) {
+            self.expect(&TokenKind::Newline)?;
+        }
         Ok(connections)
     }
 
@@ -477,7 +480,7 @@ impl Parser {
 
             let next = self.endpoint()?;
             connections.push(Connection {
-                source: prev,
+                source: prev.clone(),
                 destination: next.clone(),
             });
             prev = next;
@@ -553,7 +556,7 @@ impl Parser {
     fn match_expr(&mut self) -> Result<MatchExpr, ParseError> {
         self.expect(&TokenKind::Match)?;
         self.expect(&TokenKind::Colon)?;
-        self.expect(&TokenKind::Dedent)?;
+        
         self.expect(&TokenKind::Newline)?;
         self.expect(&TokenKind::Indent)?;
 
@@ -796,6 +799,38 @@ neuron MLP(dim):
         assert_eq!(program.neurons.len(), 1);
         let mlp = &program.neurons["MLP"];
         assert!(mlp.is_composite());
+    }
+    #[test]
+    fn test_parse_match() {
+        let source = r#"
+neuron Identity:
+  in: [*shape]
+  out: [*shape]
+  impl: core,builtin/Identity
+
+neuron Linear(in_dim, out_dim):
+  in: [*, in_dim]
+  out: [*, out_dim]
+  impl: core,nn/Linear
+
+neuron SimpleMatch:
+  in: [*, dim]
+  out: [*, 512]
+  graph:
+    in -> match:
+      [*, 512]: Identity() -> out
+      [*, 256]: Linear(256, 512) -> out
+      [*, 1024]: Linear(1024, 512) -> out
+
+neuron MatchWithWildcard:
+  in: [*, dim]
+  out: [*, 512]
+  graph:
+    in -> match:
+      [*, 512]: Identity() -> out
+      [*, d]: Linear(d, 512) -> out
+"#;
+        let program = Parser::parse(source).unwrap();
     }
 
     #[test]
