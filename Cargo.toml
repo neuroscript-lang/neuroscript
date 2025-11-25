@@ -1,0 +1,12 @@
+[package]
+name = "neuroscript"
+version = "0.1.0"
+edition = "2021"
+description = "Neural architecture composition language"
+
+[dependencies]
+thiserror = "1.0"      # Clean error types
+miette = { version = "7", features = ["fancy"] }  # Beautiful error reporting
+
+[dev-dependencies]
+pretty_assertions = "1.4"
