@@ -28,7 +28,7 @@ pub enum ShapeError {
 pub struct InferenceContext {
     /// Map from dimension name to its resolved value (if known)
     pub resolved_dims: HashMap<String, usize>,
-    
+
     /// Map from dimension name to other equivalent dimension names
     pub equivalences: HashMap<String, String>,
 
@@ -39,6 +39,10 @@ pub struct InferenceContext {
     /// Map from anonymous call IDs to their output shapes
     /// e.g. Linear(512, 256) (id=1) -> [[*, 256]]
     pub call_outputs: HashMap<usize, Vec<Shape>>,
+
+    /// Pending expression constraints to be solved
+    /// Format: (result_dim, expression, context)
+    pub pending_constraints: Vec<(Dim, DimExpr, String)>,
 }
 
 impl InferenceContext {
@@ -79,7 +83,7 @@ impl InferenceContext {
                 if n1 != n2 {
                     let v1 = self.resolved_dims.get(n1);
                     let v2 = self.resolved_dims.get(n2);
-                    
+
                     if let (Some(val1), Some(val2)) = (v1, v2) {
                         if val1 != val2 {
                             return Err(format!("Variable mismatch: {}={} != {}={}", n1, val1, n2, val2));
@@ -100,9 +104,136 @@ impl InferenceContext {
                     self.resolved_dims.insert(n.clone(), *v as usize);
                 }
             }
-            _ => {} 
+            // Unify expressions - try to solve for unknowns
+            (Dim::Expr(expr), Dim::Literal(v)) | (Dim::Literal(v), Dim::Expr(expr)) => {
+                // Try to solve the expression backwards
+                self.solve_expr_for_unknown(expr, *v as usize)?;
+            }
+            (Dim::Expr(expr), Dim::Named(name)) | (Dim::Named(name), Dim::Expr(expr)) => {
+                // If the named dim is resolved, try to solve the expression
+                if let Some(value) = self.resolved_dims.get(name).copied() {
+                    self.solve_expr_for_unknown(expr, value)?;
+                }
+            }
+            (Dim::Expr(e1), Dim::Expr(e2)) => {
+                // Both are expressions - try to evaluate both and unify results
+                let v1 = self.evaluate_expr(e1);
+                let v2 = self.evaluate_expr(e2);
+                if let (Some(val1), Some(val2)) = (v1, v2) {
+                    if val1 != val2 {
+                        return Err(format!("Expression mismatch: {} = {} != {} = {}",
+                            self.format_expr(e1), val1, self.format_expr(e2), val2));
+                    }
+                }
+                // Otherwise, we can't unify them yet
+            }
+            _ => {}
         }
         Ok(())
+    }
+
+    /// Attempt to solve an expression for an unknown variable
+    /// For example: if expr is "dim * 4" and target is 2048, solve for dim = 512
+    fn solve_expr_for_unknown(&mut self, expr: &DimExpr, target: usize) -> Result<(), String> {
+        // Try to solve for the left operand
+        if let Dim::Named(left_name) = &expr.left {
+            if !self.resolved_dims.contains_key(left_name) {
+                if let Some(right_val) = self.resolve_dim(&expr.right) {
+                    // Solve: left op right = target  =>  left = target inv_op right
+                    let left_val = match expr.op {
+                        BinOp::Mul => {
+                            if target % right_val != 0 {
+                                return Err(format!(
+                                    "Cannot solve {} * {} = {}: {} is not divisible by {}",
+                                    left_name, right_val, target, target, right_val
+                                ));
+                            }
+                            target / right_val
+                        }
+                        BinOp::Div => target * right_val,
+                        BinOp::Add => {
+                            if target < right_val {
+                                return Err(format!(
+                                    "Cannot solve {} + {} = {}: result would be negative",
+                                    left_name, right_val, target
+                                ));
+                            }
+                            target - right_val
+                        }
+                        BinOp::Sub => target + right_val,
+                        _ => return Ok(()), // Can't solve for other ops yet
+                    };
+                    self.resolved_dims.insert(left_name.clone(), left_val);
+                    return Ok(());
+                }
+            }
+        }
+
+        // Try to solve for the right operand
+        if let Dim::Named(right_name) = &expr.right {
+            if !self.resolved_dims.contains_key(right_name) {
+                if let Some(left_val) = self.resolve_dim(&expr.left) {
+                    // Solve: left op right = target  =>  right = ...
+                    let right_val = match expr.op {
+                        BinOp::Mul => {
+                            if target % left_val != 0 {
+                                return Err(format!(
+                                    "Cannot solve {} * {} = {}: {} is not divisible by {}",
+                                    left_val, right_name, target, target, left_val
+                                ));
+                            }
+                            target / left_val
+                        }
+                        BinOp::Div => {
+                            if left_val % target != 0 {
+                                return Err(format!(
+                                    "Cannot solve {} / {} = {}: {} is not divisible by {}",
+                                    left_val, right_name, target, left_val, target
+                                ));
+                            }
+                            left_val / target
+                        }
+                        BinOp::Add => {
+                            if target < left_val {
+                                return Err(format!(
+                                    "Cannot solve {} + {} = {}: result would be negative",
+                                    left_val, right_name, target
+                                ));
+                            }
+                            target - left_val
+                        }
+                        BinOp::Sub => {
+                            if left_val < target {
+                                return Err(format!(
+                                    "Cannot solve {} - {} = {}: result would be negative",
+                                    left_val, right_name, target
+                                ));
+                            }
+                            left_val - target
+                        }
+                        _ => return Ok(()), // Can't solve for other ops yet
+                    };
+                    self.resolved_dims.insert(right_name.clone(), right_val);
+                    return Ok(());
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn format_expr(&self, expr: &DimExpr) -> String {
+        format!("{} {} {}",
+            expr.left,
+            match expr.op {
+                BinOp::Add => "+",
+                BinOp::Sub => "-",
+                BinOp::Mul => "*",
+                BinOp::Div => "/",
+                _ => "?",
+            },
+            expr.right
+        )
     }
 }
 
@@ -167,14 +298,24 @@ impl ShapeInferenceEngine {
     }
 
     fn check_connection(&self, conn: &Connection, ctx: &mut InferenceContext, program: &Program) -> Result<(), ShapeError> {
+        // Build connection context for better error messages
+        let conn_context = format!("{} -> {}",
+            self.format_endpoint(&conn.source),
+            self.format_endpoint(&conn.destination)
+        );
+
         // 1. Resolve source shapes
         let source_shapes = self.resolve_endpoint_shape(&conn.source, ctx, program)
             .map_err(|e| {
                 // Add connection context to error
                 match e {
                     ShapeError::UnknownNode(node) => ShapeError::UnknownNode(
-                        format!("{} (in connection source)", node)
+                        format!("{} (in connection: {})", node, conn_context)
                     ),
+                    ShapeError::NodeInferenceFailed { node, message } => ShapeError::NodeInferenceFailed {
+                        node,
+                        message: format!("{} (in connection: {})", message, conn_context),
+                    },
                     _ => e
                 }
             })?;
@@ -204,16 +345,27 @@ impl ShapeInferenceEngine {
                      });
                 }
 
-                // Validate each input shape
+                // Validate each input shape with full compatibility checking
                 for (i, (src_shape, input_port)) in source_shapes.iter()
                     .zip(called_neuron.inputs.iter()).enumerate() {
 
-                    self.unify_shapes(src_shape, &input_port.shape, ctx).map_err(|msg| {
+                    // Check shape compatibility
+                    self.validate_connection_shapes(src_shape, &input_port.shape, ctx, &format!(
+                        "Connection: {} -> {}() input {} ({})",
+                        self.format_endpoint(&conn.source),
+                        name,
+                        i,
+                        input_port.name
+                    )).map_err(|msg| {
                         ShapeError::ConstraintViolation {
-                            message: format!("Input {} ({}): {}", i, input_port.name, msg),
+                            message: format!("Input {} ({}) shape mismatch: {}", i, input_port.name, msg),
                             context: format!(
-                                "Calling {}() with shape {} (expected {})",
-                                name, src_shape, input_port.shape
+                                "Connection: {} -> {}()\n  Source shape: {}\n  Expected shape: {}\n  Resolved dimensions: {:?}",
+                                self.format_endpoint(&conn.source),
+                                name,
+                                src_shape,
+                                input_port.shape,
+                                ctx.resolved_dims
                             ),
                         }
                     })?;
@@ -489,6 +641,72 @@ impl ShapeInferenceEngine {
         Ok(())
     }
 
+    /// Validate shape compatibility between source and destination with detailed context
+    fn validate_connection_shapes(&self, source: &Shape, dest: &Shape, ctx: &mut InferenceContext, context: &str) -> Result<(), String> {
+        // Try to unify shapes
+        self.unify_shapes(source, dest, ctx).map_err(|e| {
+            format!("{}\n  Context: {}", e, context)
+        })?;
+
+        // Check for expression constraints that need solving
+        for dim in &dest.dims {
+            if let Dim::Expr(expr) = dim {
+                self.validate_expr_constraint(expr, ctx, context)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate that an expression constraint can be satisfied
+    fn validate_expr_constraint(&self, expr: &DimExpr, ctx: &InferenceContext, context: &str) -> Result<(), String> {
+        // Check if we can evaluate the expression with current context
+        match ctx.evaluate_expr(expr) {
+            Some(_value) => {
+                // Expression is satisfied
+                Ok(())
+            }
+            None => {
+                // Check if we have enough information to potentially solve it
+                let left_resolvable = self.is_dim_resolvable(&expr.left, ctx);
+                let right_resolvable = self.is_dim_resolvable(&expr.right, ctx);
+
+                if !left_resolvable || !right_resolvable {
+                    Err(format!(
+                        "Cannot resolve expression dimension: {} {} {}\n  Missing: {}{}\n  Context: {}",
+                        expr.left,
+                        match expr.op {
+                            BinOp::Add => "+",
+                            BinOp::Sub => "-",
+                            BinOp::Mul => "*",
+                            BinOp::Div => "/",
+                            _ => "?",
+                        },
+                        expr.right,
+                        if !left_resolvable { format!("{} ", expr.left) } else { String::new() },
+                        if !right_resolvable { format!("{}", expr.right) } else { String::new() },
+                        context
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    /// Check if a dimension can be resolved with current context
+    fn is_dim_resolvable(&self, dim: &Dim, ctx: &InferenceContext) -> bool {
+        match dim {
+            Dim::Literal(_) => true,
+            Dim::Named(name) => ctx.resolved_dims.contains_key(name),
+            Dim::Wildcard => true,
+            Dim::Variadic(_) => true,
+            Dim::Expr(expr) => {
+                self.is_dim_resolvable(&expr.left, ctx) && self.is_dim_resolvable(&expr.right, ctx)
+            }
+        }
+    }
+
     /// Validate shape compatibility for a specific operation type
     fn validate_shape_compatibility(&self, op: &str, source: &Shape, dest: &Shape, ctx: &mut InferenceContext) -> Result<(), String> {
         match op {
@@ -631,5 +849,148 @@ mod tests {
 
         let s2 = literal_shape(vec![512]);
         assert!(!engine.has_variadic(&s2));
+    }
+
+    #[test]
+    fn test_expr_constraint_solving_multiply() {
+        let mut ctx = InferenceContext::new();
+
+        // Test: dim * 4 = 2048  =>  dim = 512
+        let expr = DimExpr {
+            left: Dim::Named("dim".to_string()),
+            op: BinOp::Mul,
+            right: Dim::Literal(4),
+        };
+
+        assert!(ctx.solve_expr_for_unknown(&expr, 2048).is_ok());
+        assert_eq!(ctx.resolved_dims.get("dim"), Some(&512));
+    }
+
+    #[test]
+    fn test_expr_constraint_solving_divide() {
+        let mut ctx = InferenceContext::new();
+
+        // Test: dim / 2 = 256  =>  dim = 512
+        let expr = DimExpr {
+            left: Dim::Named("dim".to_string()),
+            op: BinOp::Div,
+            right: Dim::Literal(2),
+        };
+
+        assert!(ctx.solve_expr_for_unknown(&expr, 256).is_ok());
+        assert_eq!(ctx.resolved_dims.get("dim"), Some(&512));
+    }
+
+    #[test]
+    fn test_expr_constraint_solving_add() {
+        let mut ctx = InferenceContext::new();
+
+        // Test: dim + 100 = 612  =>  dim = 512
+        let expr = DimExpr {
+            left: Dim::Named("dim".to_string()),
+            op: BinOp::Add,
+            right: Dim::Literal(100),
+        };
+
+        assert!(ctx.solve_expr_for_unknown(&expr, 612).is_ok());
+        assert_eq!(ctx.resolved_dims.get("dim"), Some(&512));
+    }
+
+    #[test]
+    fn test_expr_constraint_solving_subtract() {
+        let mut ctx = InferenceContext::new();
+
+        // Test: dim - 100 = 412  =>  dim = 512
+        let expr = DimExpr {
+            left: Dim::Named("dim".to_string()),
+            op: BinOp::Sub,
+            right: Dim::Literal(100),
+        };
+
+        assert!(ctx.solve_expr_for_unknown(&expr, 412).is_ok());
+        assert_eq!(ctx.resolved_dims.get("dim"), Some(&512));
+    }
+
+    #[test]
+    fn test_expr_constraint_solving_right_operand() {
+        let mut ctx = InferenceContext::new();
+
+        // Test: 2048 / dim = 4  =>  dim = 512
+        let expr = DimExpr {
+            left: Dim::Literal(2048),
+            op: BinOp::Div,
+            right: Dim::Named("dim".to_string()),
+        };
+
+        assert!(ctx.solve_expr_for_unknown(&expr, 4).is_ok());
+        assert_eq!(ctx.resolved_dims.get("dim"), Some(&512));
+    }
+
+    #[test]
+    fn test_expr_constraint_solving_invalid_division() {
+        let mut ctx = InferenceContext::new();
+
+        // Test: dim * 3 = 512  =>  Error (512 not divisible by 3)
+        let expr = DimExpr {
+            left: Dim::Named("dim".to_string()),
+            op: BinOp::Mul,
+            right: Dim::Literal(3),
+        };
+
+        let result = ctx.solve_expr_for_unknown(&expr, 512);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not divisible"));
+    }
+
+    #[test]
+    fn test_unify_expr_with_literal() {
+        let mut ctx = InferenceContext::new();
+
+        // Test unification: [dim * 4] unified with [2048] should solve for dim = 512
+        let expr_dim = Dim::Expr(Box::new(DimExpr {
+            left: Dim::Named("dim".to_string()),
+            op: BinOp::Mul,
+            right: Dim::Literal(4),
+        }));
+
+        let literal_dim = Dim::Literal(2048);
+
+        assert!(ctx.unify(&expr_dim, &literal_dim).is_ok());
+        assert_eq!(ctx.resolved_dims.get("dim"), Some(&512));
+    }
+
+    #[test]
+    fn test_is_dim_resolvable() {
+        let mut ctx = InferenceContext::new();
+        let engine = ShapeInferenceEngine::new();
+
+        // Literal is always resolvable
+        assert!(engine.is_dim_resolvable(&Dim::Literal(512), &ctx));
+
+        // Wildcard is always resolvable
+        assert!(engine.is_dim_resolvable(&Dim::Wildcard, &ctx));
+
+        // Named dimension not yet resolved
+        assert!(!engine.is_dim_resolvable(&Dim::Named("dim".to_string()), &ctx));
+
+        // Resolve it
+        ctx.resolved_dims.insert("dim".to_string(), 512);
+        assert!(engine.is_dim_resolvable(&Dim::Named("dim".to_string()), &ctx));
+
+        // Expression with resolvable operands
+        let expr = Dim::Expr(Box::new(DimExpr {
+            left: Dim::Named("dim".to_string()),
+            op: BinOp::Mul,
+            right: Dim::Literal(4),
+        }));
+        assert!(engine.is_dim_resolvable(&expr, &ctx));
+
+        // Expression with unresolvable operand
+        let expr2 = Dim::Expr(Box::new(DimExpr {
+            left: Dim::Named("unknown".to_string()),
+            op: BinOp::Mul,
+            right: Dim::Literal(4),
+        }));
+        assert!(!engine.is_dim_resolvable(&expr2, &ctx));
     }
 }
