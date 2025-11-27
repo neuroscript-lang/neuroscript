@@ -282,8 +282,8 @@
 
 ### Must-have for MVP
 
-1. Missing primitives (Fork, Add, Concat, Attention)
-2. Shape inference engine ⭐
+1. ✅ Missing primitives (Fork, Add, Concat, Attention)
+2. ✅ Shape inference engine ⭐
 3. Enhanced pattern matching ⭐
 4. Complete stdlib composites
 5. Recursive codegen

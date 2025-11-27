@@ -36,25 +36,41 @@ impl std::fmt::Display for CodegenError {
 
 impl std::error::Error for CodegenError {}
 
+/// Result of shape check generation containing condition and dimension bindings
+#[derive(Debug)]
+struct ShapeCheckResult {
+    /// Boolean condition for runtime shape checking (e.g., "x.ndim == 2 and x.shape[1] == 512")
+    condition: String,
+    /// Dimension binding statements (e.g., vec!["d = x.shape[1]"])
+    /// These should be emitted before the pipeline code in a match arm
+    bindings: Vec<String>,
+    /// Guard expression (if present and uses captured dimensions, should be checked after bindings)
+    guard_condition: Option<String>,
+}
+
 /// Code generator state
 struct CodeGenerator<'a> {
     program: &'a Program,
     registry: StdlibRegistry,
-    
+
     /// Counter for generating unique node IDs
     node_counter: usize,
-    
+
     /// Set of primitive neurons used (for imports)
     used_primitives: HashSet<String>,
-    
+
     /// Mapping from IR endpoints to Python variable names
     var_names: HashMap<String, String>,
-    
+
     /// Mapping from Call endpoint keys to module instance names
     call_to_module: HashMap<String, String>,
-    
+
     /// Parameters of the current neuron being generated
     current_neuron_params: HashSet<String>,
+
+    /// Dimension bindings from match pattern captures (e.g., "d" -> "x.shape[1]")
+    /// Used to resolve dimension references in match arm pipelines
+    binding_context: HashMap<String, String>,
 }
 
 impl<'a> CodeGenerator<'a> {
@@ -67,6 +83,7 @@ impl<'a> CodeGenerator<'a> {
             var_names: HashMap::new(),
             call_to_module: HashMap::new(),
             current_neuron_params: HashSet::new(),
+            binding_context: HashMap::new(),
         }
     }
     
@@ -96,6 +113,21 @@ impl<'a> CodeGenerator<'a> {
         Ok(output)
     }
     
+    /// Check if a Value contains references to captured dimensions (not parameters)
+    fn has_captured_dimensions(&self, value: &Value) -> bool {
+        match value {
+            Value::Name(n) => !self.current_neuron_params.contains(n),
+            Value::BinOp { left, right, .. } => {
+                self.has_captured_dimensions(left) || self.has_captured_dimensions(right)
+            }
+            Value::Call { args, kwargs, .. } => {
+                args.iter().any(|v| self.has_captured_dimensions(v)) ||
+                kwargs.iter().any(|(_, v)| self.has_captured_dimensions(v))
+            }
+            _ => false,
+        }
+    }
+
     /// Generate __init__ method
     fn generate_init(&mut self, output: &mut String, neuron: &NeuronDef) -> Result<(), CodegenError> {
         // Build parameter list
@@ -140,7 +172,7 @@ impl<'a> CodeGenerator<'a> {
         let mut seen_calls: HashMap<String, (String, String, Vec<Value>, Vec<(String, Value)>)> = HashMap::new();
         let mut all_endpoints = Vec::new();
         self.collect_calls(connections, &mut all_endpoints);
-        
+
         for endpoint in &all_endpoints {
             if let Endpoint::Call { name, args, kwargs, .. } = endpoint {
                 let key = self.endpoint_key(&endpoint);
@@ -153,12 +185,26 @@ impl<'a> CodeGenerator<'a> {
                 }
             }
         }
-        
+
         // Generate instantiations in deterministic order
         let mut calls: Vec<_> = seen_calls.into_iter().collect();
         calls.sort_by(|a, b| a.1.1.cmp(&b.1.1)); // Sort by module_name for determinism
-        
+
+        let mut instantiated_count = 0;
         for (_key, (name, module_name, args, kwargs)) in &calls {
+            // Check if any arguments contain captured dimensions
+            let has_captured = args.iter().any(|v| self.has_captured_dimensions(v)) ||
+                               kwargs.iter().any(|(_, v)| self.has_captured_dimensions(v));
+
+            if has_captured {
+                // Skip instantiation in __init__ for modules with captured dimensions
+                // They will be instantiated lazily in forward()
+                // Initialize cache variable to None
+                writeln!(output, "        self._{} = None  # Lazy instantiation (has captured dimensions)", module_name).unwrap();
+                instantiated_count += 1;
+                continue;
+            }
+
             // Check if this is a primitive
             let is_primitive = if let Some(neuron) = self.program.neurons.get(name.as_str()) {
                 neuron.is_primitive()
@@ -166,17 +212,17 @@ impl<'a> CodeGenerator<'a> {
                 // Assume it's a primitive if not in program
                 true
             };
-           
+
             if is_primitive {
                 self.used_primitives.insert(name.clone());
             }
-            
+
             // Generate instantiation
             let args_str = args.iter()
                 .map(|v| self.value_to_python(v))
                 .collect::<Vec<_>>()
                 .join(", ");
-            
+
             let kwargs_str = if kwargs.is_empty() {
                 String::new()
             } else {
@@ -189,15 +235,16 @@ impl<'a> CodeGenerator<'a> {
                     format!(", {}", kw.join(", "))
                 }
             };
-            
+
             writeln!(output, "        self.{} = {}({}{})", module_name, name, args_str, kwargs_str).unwrap();
+            instantiated_count += 1;
         }
-        
+
         // If no modules were instantiated, add pass
-        if calls.is_empty() {
+        if instantiated_count == 0 {
             writeln!(output, "        pass").unwrap();
         }
-        
+
         Ok(())
     }
     
@@ -333,7 +380,7 @@ impl<'a> CodeGenerator<'a> {
                 writeln!(output, "{}{} = {}", indent, var_names.join(", "), source_var).unwrap();
                 Ok(source_var) // Return tuple as result
             }
-            Endpoint::Call { name, .. } => {
+            Endpoint::Call { name, args, kwargs, .. } => {
                 // Generate a call to the module
                 let key = self.endpoint_key(endpoint);
                 let module_name = self.call_to_module.get(&key)
@@ -341,13 +388,55 @@ impl<'a> CodeGenerator<'a> {
                     .ok_or_else(|| CodegenError::InvalidConnection(
                         format!("Module for call to {} not found", name)
                     ))?;
-                
+
                 let result_var = format!("x{}", *temp_var_counter);
                 *temp_var_counter += 1;
-                
-                // Generate the call
-                writeln!(output, "{}{} = self.{}({})", indent, result_var, module_name, source_var).unwrap();
-                
+
+                // Check if this call has captured dimensions (needs lazy instantiation)
+                let has_captured = args.iter().any(|v| self.has_captured_dimensions(v)) ||
+                                   kwargs.iter().any(|(_, v)| self.has_captured_dimensions(v));
+
+                if has_captured {
+                    // Lazy instantiation: check cache, instantiate if needed
+                    writeln!(output, "{}if self._{} is None:", indent, module_name).unwrap();
+
+                    // Generate instantiation with current dimension values
+                    let args_str = args.iter()
+                        .map(|v| self.value_to_python(v))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+
+                    let kwargs_str = if kwargs.is_empty() {
+                        String::new()
+                    } else {
+                        let kw: Vec<String> = kwargs.iter()
+                            .map(|(k, v)| format!("{}={}", k, self.value_to_python(v)))
+                            .collect();
+                        if args.is_empty() {
+                            kw.join(", ")
+                        } else {
+                            format!(", {}", kw.join(", "))
+                        }
+                    };
+
+                    // Mark as primitive for imports
+                    if let Some(neuron) = self.program.neurons.get(name.as_str()) {
+                        if neuron.is_primitive() {
+                            self.used_primitives.insert(name.clone());
+                        }
+                    } else {
+                        self.used_primitives.insert(name.clone());
+                    }
+
+                    writeln!(output, "{}    self._{} = {}({}{})", indent, module_name, name, args_str, kwargs_str).unwrap();
+
+                    // Call the lazily-instantiated module
+                    writeln!(output, "{}{} = self._{}({})", indent, result_var, module_name, source_var).unwrap();
+                } else {
+                    // Normal call to pre-instantiated module
+                    writeln!(output, "{}{} = self.{}({})", indent, result_var, module_name, source_var).unwrap();
+                }
+
                 Ok(result_var)
             }
             Endpoint::Match(match_expr) => {
@@ -359,19 +448,33 @@ impl<'a> CodeGenerator<'a> {
 
                 let mut first = true;
                 for arm in &match_expr.arms {
-                    let condition = self.generate_shape_check(&arm.pattern, arm.guard.as_ref(), &source_var);
+                    let shape_check = self.generate_shape_check(&arm.pattern, arm.guard.as_ref(), &source_var);
                     let prefix = if first { "if" } else { "elif" };
                     first = false;
 
-                    writeln!(output, "{}{} {}:", indent, prefix, condition).unwrap();
+                    writeln!(output, "{}{} {}:", indent, prefix, shape_check.condition).unwrap();
 
                     // Process pipeline - save var_names to avoid pollution from match arm scope
                     let saved_var_names = self.var_names.clone();
                     let arm_indent = format!("{}    ", indent);
+
+                    // Emit dimension bindings before processing pipeline
+                    for binding in &shape_check.bindings {
+                        writeln!(output, "{}{}", arm_indent, binding).unwrap();
+                    }
+
+                    // If guard uses captured dimensions, check it after binding
+                    let pipeline_indent = if let Some(guard_cond) = &shape_check.guard_condition {
+                        writeln!(output, "{}if {}:", arm_indent, guard_cond).unwrap();
+                        format!("{}    ", arm_indent)
+                    } else {
+                        arm_indent.clone()
+                    };
+
                     let mut current_var = source_var.clone();
 
                     for ep in &arm.pipeline {
-                         current_var = self.process_destination(output, ep, current_var, &arm_indent, temp_var_counter, call_to_result)?;
+                         current_var = self.process_destination(output, ep, current_var, &pipeline_indent, temp_var_counter, call_to_result)?;
 
                          // If endpoint was a Call, store result in call_to_result
                         if let Endpoint::Call { .. } = ep {
@@ -380,7 +483,7 @@ impl<'a> CodeGenerator<'a> {
                         }
                     }
 
-                    writeln!(output, "{}{} = {}", arm_indent, result_var, current_var).unwrap();
+                    writeln!(output, "{}{} = {}", pipeline_indent, result_var, current_var).unwrap();
 
                     // Restore var_names to prevent match arm scope from leaking
                     self.var_names = saved_var_names;
@@ -395,9 +498,19 @@ impl<'a> CodeGenerator<'a> {
         }
     }
 
-    /// Generate a runtime shape check condition, including optional guard
-    fn generate_shape_check(&self, pattern: &crate::ir::Shape, guard: Option<&Value>, var_name: &str) -> String {
+    /// Generate a runtime shape check condition and dimension bindings
+    ///
+    /// Returns a ShapeCheckResult containing:
+    /// - condition: Boolean expression for runtime check (shape checks only, no guard)
+    /// - bindings: Dimension variable assignments (e.g., "d = x.shape[1]")
+    /// - guard_condition: Separate guard check if it references captured dimensions
+    ///
+    /// Named dimensions in patterns are handled as follows:
+    /// - If the name is a neuron parameter: Check equality (no binding needed)
+    /// - Otherwise: Capture the dimension value for use in the pipeline
+    fn generate_shape_check(&self, pattern: &crate::ir::Shape, guard: Option<&Value>, var_name: &str) -> ShapeCheckResult {
         let mut checks = Vec::new();
+        let mut bindings = Vec::new();
 
         // Rank check (unless variadic)
         let has_variadic = pattern.dims.iter().any(|d| matches!(d, crate::ir::Dim::Variadic(_)));
@@ -413,24 +526,39 @@ impl<'a> CodeGenerator<'a> {
                 crate::ir::Dim::Named(n) => {
                     // Check if it's a parameter
                     if self.current_neuron_params.contains(n) {
+                        // Parameter: check equality with self.param
                         checks.push(format!("{}.shape[{}] == self.{}", var_name, i, n));
+                    } else {
+                        // Pattern capture: bind dimension for use in pipeline
+                        bindings.push(format!("{} = {}.shape[{}]", n, var_name, i));
                     }
                 }
                 _ => {} // Skip Wildcard, Variadic, Expr for now
             }
         }
 
-        // Add guard condition if present
-        if let Some(guard_expr) = guard {
-            let guard_str = self.value_to_python_with_self(guard_expr);
-            checks.push(format!("({})", guard_str));
-        }
+        // Handle guard: if it references captured dimensions, defer to after binding
+        let guard_condition = if let Some(guard_expr) = guard {
+            if !bindings.is_empty() && self.has_captured_dimensions(guard_expr) {
+                // Guard uses captured dims - check it separately after binding
+                Some(self.value_to_python_with_self(guard_expr))
+            } else {
+                // Guard doesn't use captured dims - include in main condition
+                let guard_str = self.value_to_python_with_self(guard_expr);
+                checks.push(format!("({})", guard_str));
+                None
+            }
+        } else {
+            None
+        };
 
-        if checks.is_empty() {
+        let condition = if checks.is_empty() {
             "True".to_string()
         } else {
             checks.join(" and ")
-        }
+        };
+
+        ShapeCheckResult { condition, bindings, guard_condition }
     }
 
     /// Convert a Value to Python, replacing parameter names with self.param
@@ -750,5 +878,124 @@ mod tests {
         // Note: IDs might vary depending on counter, but names should be consistent
         assert!(code.contains("self.identity_"));
         assert!(code.contains("self.linear_"));
+    }
+
+    #[test]
+    fn test_codegen_match_with_captured_dims() {
+        use crate::ir::*;
+
+        // Test match expression with captured dimensions
+        let mut program = Program::new();
+        let neuron = NeuronDef {
+            name: "DynamicMatch".to_string(),
+            params: vec![],
+            inputs: vec![Port { name: "default".to_string(), shape: Shape::new(vec![Dim::Wildcard, Dim::Wildcard]) }],
+            outputs: vec![Port { name: "default".to_string(), shape: Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]) }],
+            body: NeuronBody::Graph(vec![
+                Connection {
+                    source: Endpoint::Ref(PortRef::new("in")),
+                    destination: Endpoint::Match(MatchExpr {
+                        arms: vec![
+                            MatchArm {
+                                pattern: Shape::new(vec![Dim::Wildcard, Dim::Named("d".to_string())]),
+                                guard: Some(Value::BinOp {
+                                    op: BinOp::Gt,
+                                    left: Box::new(Value::Name("d".to_string())),
+                                    right: Box::new(Value::Int(512))
+                                }),
+                                pipeline: vec![
+                                    Endpoint::Call {
+                                        name: "Linear".to_string(),
+                                        args: vec![Value::Name("d".to_string()), Value::Int(512)],
+                                        kwargs: vec![],
+                                        id: 0
+                                    },
+                                    Endpoint::Ref(PortRef::new("out"))
+                                ]
+                            },
+                            MatchArm {
+                                pattern: Shape::new(vec![Dim::Wildcard, Dim::Named("d".to_string())]),
+                                guard: None,
+                                pipeline: vec![
+                                    Endpoint::Call {
+                                        name: "Linear".to_string(),
+                                        args: vec![Value::Name("d".to_string()), Value::Int(256)],
+                                        kwargs: vec![],
+                                        id: 1
+                                    },
+                                    Endpoint::Call {
+                                        name: "Linear".to_string(),
+                                        args: vec![Value::Int(256), Value::Int(512)],
+                                        kwargs: vec![],
+                                        id: 2
+                                    },
+                                    Endpoint::Ref(PortRef::new("out"))
+                                ]
+                            }
+                        ]
+                    })
+                }
+            ])
+        };
+
+        program.neurons.insert("DynamicMatch".to_string(), neuron);
+
+        let code = generate_pytorch(&program, "DynamicMatch").unwrap();
+        println!("{}", code);
+
+        // Verify dimension binding is generated
+        assert!(code.contains("d = x.shape[1]"), "Dimension binding should be generated");
+
+        // Verify guard condition includes the bound dimension (on separate line after binding)
+        assert!(code.contains("if d > 512:"), "Guard should reference bound dimension");
+
+        // Verify lazy instantiation for modules with captured dimensions
+        assert!(code.contains("self._linear_") && code.contains("= None"), "Should have lazy instantiation");
+        assert!(code.contains("if self._linear_") && code.contains("is None:"), "Should check for lazy instantiation");
+        assert!(code.contains("Linear(d,"), "Should instantiate Linear with captured dimension");
+    }
+
+    #[test]
+    fn test_codegen_match_guards_with_bindings() {
+        use crate::ir::*;
+
+        // Test guard expression that references captured dimension
+        let mut program = Program::new();
+        let neuron = NeuronDef {
+            name: "GuardTest".to_string(),
+            params: vec![],
+            inputs: vec![Port { name: "default".to_string(), shape: Shape::new(vec![Dim::Wildcard, Dim::Wildcard]) }],
+            outputs: vec![Port { name: "default".to_string(), shape: Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]) }],
+            body: NeuronBody::Graph(vec![
+                Connection {
+                    source: Endpoint::Ref(PortRef::new("in")),
+                    destination: Endpoint::Match(MatchExpr {
+                        arms: vec![
+                            MatchArm {
+                                pattern: Shape::new(vec![Dim::Wildcard, Dim::Named("dim".to_string())]),
+                                guard: Some(Value::BinOp {
+                                    op: BinOp::Le,
+                                    left: Box::new(Value::Name("dim".to_string())),
+                                    right: Box::new(Value::Int(512))
+                                }),
+                                pipeline: vec![
+                                    Endpoint::Call { name: "Identity".to_string(), args: vec![], kwargs: vec![], id: 0 },
+                                    Endpoint::Ref(PortRef::new("out"))
+                                ]
+                            }
+                        ]
+                    })
+                }
+            ])
+        };
+
+        program.neurons.insert("GuardTest".to_string(), neuron);
+
+        let code = generate_pytorch(&program, "GuardTest").unwrap();
+        println!("{}", code);
+
+        // Verify dimension is bound before being used in guard
+        assert!(code.contains("dim = x.shape[1]"), "Dimension must be bound");
+        assert!(code.contains("if dim <= 512:"), "Guard should use bound dimension");
     }
 }
