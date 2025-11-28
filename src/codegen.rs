@@ -447,12 +447,28 @@ impl<'a> CodeGenerator<'a> {
                 writeln!(output, "{}{} = None", indent, result_var).unwrap();
 
                 let mut first = true;
+                let mut prev_condition = String::new();
                 for arm in &match_expr.arms {
                     let shape_check = self.generate_shape_check(&arm.pattern, arm.guard.as_ref(), &source_var);
-                    let prefix = if first { "if" } else { "elif" };
+                    
+                    // Determine prefix: use "else:" if pattern condition is same as previous
+                    let prefix = if first {
+                        "if"
+                    } else if shape_check.condition == prev_condition {
+                        // Same pattern, different guard (or no guard) -> use else
+                        "else"
+                    } else {
+                        "elif"
+                    };
                     first = false;
 
-                    writeln!(output, "{}{} {}:", indent, prefix, shape_check.condition).unwrap();
+                    // Only output condition if it's not "else"
+                    if prefix == "else" {
+                        writeln!(output, "{}{}:", indent, prefix).unwrap();
+                    } else {
+                        writeln!(output, "{}{} {}:", indent, prefix, shape_check.condition).unwrap();
+                        prev_condition = shape_check.condition.clone();
+                    }
 
                     // Process pipeline - save var_names to avoid pollution from match arm scope
                     let saved_var_names = self.var_names.clone();

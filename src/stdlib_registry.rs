@@ -235,6 +235,15 @@ impl StdlibRegistry {
 
         // Level 0: Structural Operations
         self.register(
+            "Identity",
+            ImplRef::with_desc(
+                "neuroscript_runtime.primitives.structural",
+                "Identity",
+                "Identity operation (pass-through, no-op)",
+            ),
+        );
+
+        self.register(
             "Fork",
             ImplRef::with_desc(
                 "neuroscript_runtime.primitives.structural",
