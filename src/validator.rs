@@ -34,6 +34,15 @@ pub enum ValidationError {
         node: String,
         context: String,
     },
+    NonExhaustiveMatch {
+        context: String,
+        suggestion: String,
+    },
+    UnreachableMatchArm {
+        arm_index: usize,
+        shadowed_by: usize,
+        context: String,
+    },
     Custom(String),
 }
 
@@ -56,6 +65,13 @@ impl std::fmt::Display for ValidationError {
             }
             ValidationError::UnknownNode { node, context } => {
                 write!(f, "Unknown node '{}' (in {})", node, context)
+            }
+            ValidationError::NonExhaustiveMatch { context, suggestion } => {
+                write!(f, "Non-exhaustive match expression (in {}): {}", context, suggestion)
+            }
+            ValidationError::UnreachableMatchArm { arm_index, shadowed_by, context } => {
+                write!(f, "Unreachable match arm {} shadowed by arm {} (in {})",
+                       arm_index, shadowed_by, context)
             }
             ValidationError::Custom(msg) => {
                 write!(f, "{}", msg)
@@ -132,6 +148,11 @@ impl Validator {
             // Check that neurons exist
             errors.extend(Self::check_neurons_exist(&connection.source, &neuron.name, program));
             errors.extend(Self::check_neurons_exist(&connection.destination, &neuron.name, program));
+
+            // Validate match expressions
+            if let Endpoint::Match(match_expr) = &connection.destination {
+                errors.extend(Self::validate_match_expression(match_expr, &neuron.name));
+            }
 
             // Resolve source and destination endpoints
             let source_resolution = Self::resolve_endpoint(
@@ -843,6 +864,133 @@ impl Validator {
         rec_stack.remove(node);
         None
     }
+
+    /// Validate a match expression for exhaustiveness and pattern shadowing
+    fn validate_match_expression(match_expr: &MatchExpr, context_neuron: &str) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+
+        // Check exhaustiveness: last pattern should be a catch-all
+        if !match_expr.arms.is_empty() {
+            let last_pattern = &match_expr.arms.last().unwrap().pattern;
+            if !Self::is_catch_all_pattern(last_pattern) {
+                errors.push(ValidationError::NonExhaustiveMatch {
+                    context: context_neuron.to_string(),
+                    suggestion: format!(
+                        "Add a catch-all pattern as the last arm, e.g., [*shape] or [*, d]"
+                    ),
+                });
+            }
+        }
+
+        // Check for pattern shadowing
+        for i in 0..match_expr.arms.len() {
+            for j in (i + 1)..match_expr.arms.len() {
+                let arm_i = &match_expr.arms[i];
+                let arm_j = &match_expr.arms[j];
+
+                // Check if arm i subsumes arm j (making j unreachable)
+                // A pattern with a guard does NOT subsume any pattern (guard can fail)
+                if arm_i.guard.is_none() && Self::pattern_subsumes(&arm_i.pattern, &arm_j.pattern) {
+                    errors.push(ValidationError::UnreachableMatchArm {
+                        arm_index: j,
+                        shadowed_by: i,
+                        context: format!("{}: pattern {} is unreachable", context_neuron, arm_j.pattern),
+                    });
+                }
+            }
+        }
+
+        errors
+    }
+
+    /// Check if a pattern is a catch-all (matches everything)
+    fn is_catch_all_pattern(pattern: &Shape) -> bool {
+        // A pattern is catch-all if:
+        // 1. All dimensions are wildcards: [*, *, ...]
+        // 2. It's a single variadic: [*shape]
+        // 3. It has only wildcards and/or named dimensions (no literals)
+
+        if pattern.dims.is_empty() {
+            return false;
+        }
+
+        // Check for variadic - a pattern with a variadic can match any rank
+        let has_variadic = pattern.dims.iter().any(|d| matches!(d, Dim::Variadic(_)));
+        if has_variadic {
+            // Variadic patterns are catch-all if they have no literals
+            return !pattern.dims.iter().any(|d| matches!(d, Dim::Literal(_)));
+        }
+
+        // Non-variadic patterns are catch-all if all dims are wildcards or named (no literals)
+        pattern.dims.iter().all(|d| {
+            matches!(d, Dim::Wildcard | Dim::Named(_))
+        })
+    }
+
+    /// Check if pattern `general` subsumes (is more general than) pattern `specific`
+    /// If `general` subsumes `specific`, then `specific` is unreachable when placed after `general`
+    fn pattern_subsumes(general: &Shape, specific: &Shape) -> bool {
+        // Variadic patterns subsume based on their prefix/suffix constraints
+        let general_has_variadic = general.dims.iter().any(|d| matches!(d, Dim::Variadic(_)));
+        let specific_has_variadic = specific.dims.iter().any(|d| matches!(d, Dim::Variadic(_)));
+
+        match (general_has_variadic, specific_has_variadic) {
+            (true, _) => {
+                // General has variadic - it subsumes specific if prefix/suffix match or are more general
+                // For MVP, conservatively say variadic patterns don't subsume non-variadic
+                // (to avoid false positives)
+                specific_has_variadic && Self::variadic_patterns_compatible(general, specific)
+            }
+            (false, true) => {
+                // Specific has variadic but general doesn't - no subsumption
+                false
+            }
+            (false, false) => {
+                // Neither has variadic - check rank and dimension-wise subsumption
+                Self::non_variadic_subsumes(general, specific)
+            }
+        }
+    }
+
+    /// Check if two variadic patterns are compatible (conservative check)
+    fn variadic_patterns_compatible(p1: &Shape, p2: &Shape) -> bool {
+        // For MVP, just check if they have the same structure
+        // A full implementation would check prefix/suffix compatibility
+        p1.dims.len() == p2.dims.len()
+    }
+
+    /// Check if non-variadic pattern `general` subsumes `specific`
+    fn non_variadic_subsumes(general: &Shape, specific: &Shape) -> bool {
+        // Different ranks - no subsumption
+        if general.dims.len() != specific.dims.len() {
+            return false;
+        }
+
+        // Check dimension by dimension
+        for (g_dim, s_dim) in general.dims.iter().zip(specific.dims.iter()) {
+            match (g_dim, s_dim) {
+                // Wildcard matches anything
+                (Dim::Wildcard, _) => continue,
+                // Named dimensions match anything (they capture)
+                (Dim::Named(_), _) => continue,
+                // Literal must match exactly
+                (Dim::Literal(g_lit), Dim::Literal(s_lit)) => {
+                    if g_lit != s_lit {
+                        return false; // Different literals - not subsumed
+                    }
+                }
+                // Literal in general, but wildcard/named in specific - not subsumed
+                (Dim::Literal(_), _) => return false,
+                // Expression dimensions - conservative check
+                (Dim::Expr(_), _) => continue, // TODO: implement expression subsumption
+                // Variadic should have been handled above
+                (Dim::Variadic(_), _) => continue,
+            }
+        }
+
+        // All dimensions of general are as general or more general than specific
+        true
+    }
 }
 
 #[cfg(test)]
@@ -1372,5 +1520,149 @@ mod tests {
 
         let result = Validator::validate(&program);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_match_exhaustiveness_with_catchall() {
+        // Match with catch-all pattern should pass
+        let mut program = Program::new();
+        let neuron = NeuronDef {
+            name: "TestMatch".to_string(),
+            params: vec![],
+            inputs: vec![Port { name: "default".to_string(), shape: Shape::new(vec![Dim::Wildcard, Dim::Wildcard]) }],
+            outputs: vec![Port { name: "default".to_string(), shape: Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]) }],
+            body: NeuronBody::Graph(vec![Connection {
+                source: Endpoint::Ref(PortRef::new("in")),
+                destination: Endpoint::Match(MatchExpr {
+                    arms: vec![
+                        MatchArm {
+                            pattern: Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]),
+                            guard: None,
+                            pipeline: vec![Endpoint::Ref(PortRef::new("out"))],
+                        },
+                        MatchArm {
+                            pattern: Shape::new(vec![Dim::Wildcard, Dim::Named("d".to_string())]),
+                            guard: None,
+                            pipeline: vec![Endpoint::Ref(PortRef::new("out"))],
+                        },
+                    ],
+                }),
+            }]),
+        };
+        program.neurons.insert("TestMatch".to_string(), neuron);
+
+        let result = Validator::validate(&program);
+        assert!(result.is_ok(), "Match with catch-all pattern should be valid");
+    }
+
+    #[test]
+    fn test_match_exhaustiveness_without_catchall() {
+        // Match without catch-all pattern should fail
+        let mut program = Program::new();
+        let neuron = NeuronDef {
+            name: "TestMatch".to_string(),
+            params: vec![],
+            inputs: vec![Port { name: "default".to_string(), shape: Shape::new(vec![Dim::Wildcard, Dim::Wildcard]) }],
+            outputs: vec![Port { name: "default".to_string(), shape: Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]) }],
+            body: NeuronBody::Graph(vec![Connection {
+                source: Endpoint::Ref(PortRef::new("in")),
+                destination: Endpoint::Match(MatchExpr {
+                    arms: vec![
+                        MatchArm {
+                            pattern: Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]),
+                            guard: None,
+                            pipeline: vec![Endpoint::Ref(PortRef::new("out"))],
+                        },
+                        MatchArm {
+                            pattern: Shape::new(vec![Dim::Wildcard, Dim::Literal(256)]),
+                            guard: None,
+                            pipeline: vec![Endpoint::Ref(PortRef::new("out"))],
+                        },
+                    ],
+                }),
+            }]),
+        };
+        program.neurons.insert("TestMatch".to_string(), neuron);
+
+        let result = Validator::validate(&program);
+        assert!(result.is_err(), "Match without catch-all should fail");
+        if let Err(errors) = result {
+            assert!(errors.iter().any(|e| matches!(e, ValidationError::NonExhaustiveMatch { .. })));
+        }
+    }
+
+    #[test]
+    fn test_match_pattern_shadowing() {
+        // Match with shadowed pattern should fail
+        let mut program = Program::new();
+        let neuron = NeuronDef {
+            name: "TestMatch".to_string(),
+            params: vec![],
+            inputs: vec![Port { name: "default".to_string(), shape: Shape::new(vec![Dim::Wildcard, Dim::Wildcard]) }],
+            outputs: vec![Port { name: "default".to_string(), shape: Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]) }],
+            body: NeuronBody::Graph(vec![Connection {
+                source: Endpoint::Ref(PortRef::new("in")),
+                destination: Endpoint::Match(MatchExpr {
+                    arms: vec![
+                        MatchArm {
+                            pattern: Shape::new(vec![Dim::Wildcard, Dim::Named("d".to_string())]),
+                            guard: None,
+                            pipeline: vec![Endpoint::Ref(PortRef::new("out"))],
+                        },
+                        MatchArm {
+                            pattern: Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]),
+                            guard: None,
+                            pipeline: vec![Endpoint::Ref(PortRef::new("out"))],
+                        },
+                    ],
+                }),
+            }]),
+        };
+        program.neurons.insert("TestMatch".to_string(), neuron);
+
+        let result = Validator::validate(&program);
+        assert!(result.is_err(), "Match with shadowed pattern should fail");
+        if let Err(errors) = result {
+            assert!(errors.iter().any(|e| matches!(e, ValidationError::UnreachableMatchArm { .. })));
+        }
+    }
+
+    #[test]
+    fn test_pattern_subsumption() {
+        // Test pattern subsumption logic
+        let general = Shape::new(vec![Dim::Wildcard, Dim::Wildcard]);
+        let specific = Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]);
+        assert!(Validator::pattern_subsumes(&general, &specific));
+
+        let named = Shape::new(vec![Dim::Wildcard, Dim::Named("d".to_string())]);
+        let literal = Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]);
+        assert!(Validator::pattern_subsumes(&named, &literal));
+
+        let lit1 = Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]);
+        let lit2 = Shape::new(vec![Dim::Wildcard, Dim::Literal(256)]);
+        assert!(!Validator::pattern_subsumes(&lit1, &lit2));
+    }
+
+    #[test]
+    fn test_is_catch_all_pattern() {
+        // All wildcards
+        let pattern1 = Shape::new(vec![Dim::Wildcard, Dim::Wildcard]);
+        assert!(Validator::is_catch_all_pattern(&pattern1));
+
+        // Named dimensions
+        let pattern2 = Shape::new(vec![Dim::Wildcard, Dim::Named("d".to_string())]);
+        assert!(Validator::is_catch_all_pattern(&pattern2));
+
+        // Variadic without literals
+        let pattern3 = Shape::new(vec![Dim::Variadic("shape".to_string())]);
+        assert!(Validator::is_catch_all_pattern(&pattern3));
+
+        // Has literal - not catch-all
+        let pattern4 = Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]);
+        assert!(!Validator::is_catch_all_pattern(&pattern4));
+
+        // Empty - not catch-all
+        let pattern5 = Shape::new(vec![]);
+        assert!(!Validator::is_catch_all_pattern(&pattern5));
     }
 }

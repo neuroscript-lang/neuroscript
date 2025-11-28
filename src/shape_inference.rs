@@ -15,12 +15,15 @@ pub enum ShapeError {
 
     #[error("Constraint violation: {message}")]
     ConstraintViolation { message: String, context: String },
-    
+
     #[error("Inference failed for node {node}: {message}")]
     NodeInferenceFailed { node: String, message: String },
 
     #[error("Unknown node or port: {0}")]
     UnknownNode(String),
+
+    #[error("Unsupported feature: {0}")]
+    UnsupportedFeature(String),
 }
 
 /// Tracks the state of dimension variables during inference
@@ -458,9 +461,202 @@ impl ShapeInferenceEngine {
 
     fn validate_match_destination(&self, arms: &[MatchArm], source_shapes: &[Shape],
                                   ctx: &mut InferenceContext, program: &Program) -> Result<(), ShapeError> {
-        // TODO: Implement match expression validation
-        // For MVP, this is a placeholder
+        if source_shapes.len() != 1 {
+            return Err(ShapeError::ConstraintViolation {
+                message: format!("Match expression requires exactly one input, got {}", source_shapes.len()),
+                context: "Match expression validation".to_string(),
+            });
+        }
+
+        let source_shape = &source_shapes[0];
+        let mut output_shapes = Vec::new();
+
+        // Validate each arm
+        for (arm_idx, arm) in arms.iter().enumerate() {
+            // Fork context for this arm to avoid cross-contamination
+            let mut arm_ctx = ctx.clone();
+
+            // Unify pattern with source shape and bind captured dimensions
+            self.unify_pattern_with_shape(&arm.pattern, source_shape, &mut arm_ctx)
+                .map_err(|e| ShapeError::ConstraintViolation {
+                    message: format!("Match arm {} pattern mismatch: {}", arm_idx, e),
+                    context: format!("Pattern: {}, Source: {}", arm.pattern, source_shape),
+                })?;
+
+            // Validate guard expression if present
+            if let Some(guard) = &arm.guard {
+                self.validate_guard_expr(guard, &arm_ctx)
+                    .map_err(|e| ShapeError::ConstraintViolation {
+                        message: format!("Match arm {} guard error: {}", arm_idx, e),
+                        context: format!("Guard in pattern: {}", arm.pattern),
+                    })?;
+            }
+
+            // Validate each endpoint in the pipeline with the forked context
+            let mut current_shapes = vec![source_shape.clone()];
+            for (ep_idx, endpoint) in arm.pipeline.iter().enumerate() {
+                // Create a temporary connection for validation
+                let temp_conn = Connection {
+                    source: if ep_idx == 0 {
+                        Endpoint::Ref(PortRef::new("in"))
+                    } else {
+                        // Use a dummy ref - we track shapes in current_shapes
+                        Endpoint::Ref(PortRef::new("_temp"))
+                    },
+                    destination: endpoint.clone(),
+                };
+
+                // Register current shapes in context
+                if ep_idx == 0 {
+                    arm_ctx.node_outputs.insert("in".to_string(), current_shapes.clone());
+                } else {
+                    arm_ctx.node_outputs.insert("_temp".to_string(), current_shapes.clone());
+                }
+
+                // Validate this connection
+                self.check_connection(&temp_conn, &mut arm_ctx, program)?;
+
+                // Get output shapes from this endpoint
+                current_shapes = self.resolve_match_endpoint(endpoint, &arm_ctx, program)?;
+            }
+
+            // Collect output shape from this arm
+            if !current_shapes.is_empty() {
+                output_shapes.push(current_shapes[0].clone());
+            }
+        }
+
+        // Validate that all arms produce compatible output shapes
+        if output_shapes.len() > 1 {
+            let first_output = &output_shapes[0];
+            for (idx, arm_output) in output_shapes.iter().skip(1).enumerate() {
+                // Check if outputs are structurally compatible
+                if !self.shapes_compatible(first_output, arm_output) {
+                    return Err(ShapeError::Mismatch {
+                        expected: first_output.clone(),
+                        got: arm_output.clone(),
+                        context: format!(
+                            "Match arms produce incompatible output shapes: arm 0 produces {}, arm {} produces {}",
+                            first_output,
+                            idx + 1,
+                            arm_output
+                        ),
+                    });
+                }
+            }
+        }
+
         Ok(())
+    }
+
+    /// Unify a pattern shape with a concrete shape, binding captured dimensions
+    fn unify_pattern_with_shape(&self, pattern: &Shape, concrete: &Shape, ctx: &mut InferenceContext) -> Result<(), String> {
+        // Handle variadic patterns
+        if self.has_variadic(pattern) {
+            return self.unify_with_variadic_pattern(pattern,
+                pattern.dims.iter().position(|d| matches!(d, Dim::Variadic(_))).unwrap(),
+                concrete, ctx);
+        }
+
+        // Check rank matches for non-variadic patterns
+        if pattern.dims.len() != concrete.dims.len() {
+            return Err(format!(
+                "Rank mismatch: pattern has {} dimensions, shape has {}",
+                pattern.dims.len(),
+                concrete.dims.len()
+            ));
+        }
+
+        // Unify each dimension
+        for (i, (pat_dim, conc_dim)) in pattern.dims.iter().zip(concrete.dims.iter()).enumerate() {
+            match (pat_dim, conc_dim) {
+                (Dim::Wildcard, _) => {
+                    // Wildcard matches anything, no binding
+                    continue;
+                }
+                (Dim::Literal(lit), _) => {
+                    // Literal must match exactly - use unify to check
+                    ctx.unify(pat_dim, conc_dim)
+                        .map_err(|e| format!("Dimension {} mismatch: {}", i, e))?;
+                }
+                (Dim::Named(name), _) => {
+                    // Named dimension: bind it if not already bound
+                    ctx.unify(pat_dim, conc_dim)
+                        .map_err(|e| format!("Dimension {} ({}): {}", i, name, e))?;
+                }
+                (Dim::Expr(_), _) => {
+                    // Expression in pattern - unify it
+                    ctx.unify(pat_dim, conc_dim)
+                        .map_err(|e| format!("Dimension {} expression mismatch: {}", i, e))?;
+                }
+                (Dim::Variadic(_), _) => {
+                    // Shouldn't reach here if has_variadic check worked
+                    unreachable!("Variadic should have been handled above")
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate a guard expression can be evaluated
+    fn validate_guard_expr(&self, _guard: &Value, _ctx: &InferenceContext) -> Result<(), String> {
+        // For MVP, assume guard is valid if it compiles
+        // TODO: Check that all referenced names are either:
+        // 1. Captured dimensions (in ctx.resolved_dims)
+        // 2. Neuron parameters
+        Ok(())
+    }
+
+    /// Resolve the output shapes of a match endpoint
+    fn resolve_match_endpoint(&self, endpoint: &Endpoint, ctx: &InferenceContext, program: &Program) -> Result<Vec<Shape>, ShapeError> {
+        match endpoint {
+            Endpoint::Ref(port_ref) => {
+                // Look up the output shape for this reference
+                if let Some(shapes) = ctx.node_outputs.get(&port_ref.node) {
+                    Ok(shapes.clone())
+                } else {
+                    Err(ShapeError::UnknownNode(format!(
+                        "Unknown node '{}' in match pipeline",
+                        port_ref.node
+                    )))
+                }
+            }
+            Endpoint::Call { name, id, .. } => {
+                // Look up output from call_outputs
+                if let Some(shapes) = ctx.call_outputs.get(id) {
+                    Ok(shapes.clone())
+                } else {
+                    // Get output shapes from neuron definition
+                    if let Some(neuron) = program.neurons.get(name) {
+                        Ok(neuron.outputs.iter().map(|p| p.shape.clone()).collect())
+                    } else {
+                        Err(ShapeError::UnknownNode(format!(
+                            "Unknown neuron '{}' in match pipeline",
+                            name
+                        )))
+                    }
+                }
+            }
+            Endpoint::Tuple(refs) => {
+                let mut shapes = Vec::new();
+                for r in refs {
+                    let s = self.resolve_match_endpoint(&Endpoint::Ref(r.clone()), ctx, program)?;
+                    shapes.extend(s);
+                }
+                Ok(shapes)
+            }
+            Endpoint::Match(_) => {
+                Err(ShapeError::UnsupportedFeature("Nested match expressions not yet supported".to_string()))
+            }
+        }
+    }
+
+    /// Check if two shapes are compatible (can be unified)
+    fn shapes_compatible(&self, s1: &Shape, s2: &Shape) -> bool {
+        // Create a temporary context for testing
+        let mut test_ctx = InferenceContext::new();
+        self.unify_shapes(s1, s2, &mut test_ctx).is_ok()
     }
 
     fn format_endpoint(&self, ep: &Endpoint) -> String {
@@ -992,5 +1188,86 @@ mod tests {
             right: Dim::Literal(4),
         }));
         assert!(!engine.is_dim_resolvable(&expr2, &ctx));
+    }
+
+    #[test]
+    fn test_match_pattern_unification() {
+        let mut ctx = InferenceContext::new();
+        let engine = ShapeInferenceEngine::new();
+
+        // Pattern [*, d] should match concrete shape [32, 512]
+        let pattern = Shape::new(vec![Dim::Wildcard, Dim::Named("d".to_string())]);
+        let concrete = literal_shape(vec![32, 512]);
+
+        assert!(engine.unify_pattern_with_shape(&pattern, &concrete, &mut ctx).is_ok());
+        assert_eq!(ctx.resolved_dims.get("d"), Some(&512));
+    }
+
+    #[test]
+    fn test_match_pattern_literal_mismatch() {
+        let mut ctx = InferenceContext::new();
+        let engine = ShapeInferenceEngine::new();
+
+        // Pattern [*, 512] should NOT match [32, 256]
+        let pattern = Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]);
+        let concrete = literal_shape(vec![32, 256]);
+
+        let result = engine.unify_pattern_with_shape(&pattern, &concrete, &mut ctx);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_match_pattern_rank_mismatch() {
+        let mut ctx = InferenceContext::new();
+        let engine = ShapeInferenceEngine::new();
+
+        // Pattern [*, d] should NOT match 3D shape [32, 64, 512]
+        let pattern = Shape::new(vec![Dim::Wildcard, Dim::Named("d".to_string())]);
+        let concrete = literal_shape(vec![32, 64, 512]);
+
+        let result = engine.unify_pattern_with_shape(&pattern, &concrete, &mut ctx);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Rank mismatch"));
+    }
+
+    #[test]
+    fn test_match_variadic_pattern() {
+        let mut ctx = InferenceContext::new();
+        let engine = ShapeInferenceEngine::new();
+
+        // Pattern [*batch, d] should match [32, 64, 128, 512]
+        let pattern = Shape::new(vec![
+            Dim::Variadic("batch".to_string()),
+            Dim::Named("d".to_string())
+        ]);
+        let concrete = literal_shape(vec![32, 64, 128, 512]);
+
+        assert!(engine.unify_pattern_with_shape(&pattern, &concrete, &mut ctx).is_ok());
+        assert_eq!(ctx.resolved_dims.get("d"), Some(&512));
+    }
+
+    #[test]
+    fn test_shapes_compatible() {
+        let engine = ShapeInferenceEngine::new();
+
+        // Compatible: same literal shapes
+        let s1 = literal_shape(vec![512, 256]);
+        let s2 = literal_shape(vec![512, 256]);
+        assert!(engine.shapes_compatible(&s1, &s2));
+
+        // Compatible: named dimensions can unify
+        let s3 = named_shape(vec!["d1", "d2"]);
+        let s4 = literal_shape(vec![512, 256]);
+        assert!(engine.shapes_compatible(&s3, &s4));
+
+        // Incompatible: different literals
+        let s5 = literal_shape(vec![512, 256]);
+        let s6 = literal_shape(vec![512, 128]);
+        assert!(!engine.shapes_compatible(&s5, &s6));
+
+        // Incompatible: rank mismatch
+        let s7 = literal_shape(vec![512]);
+        let s8 = literal_shape(vec![512, 256]);
+        assert!(!engine.shapes_compatible(&s7, &s8));
     }
 }
