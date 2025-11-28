@@ -8,7 +8,9 @@ neuron Identity():
 neuron Recurse(d_model, num_heads, d_ff, depth):
   in: [*, seq, d_model]
   out: [*, seq, d_model]
+  let:
+    recurse = Recurse(d_model, num_heads, d_ff, depth - 1)
   graph:
     in -> match:
-      [*, seq, d_model] where depth > 0: Recurse(d_model, num_heads, d_ff, depth - 1)
+      [*, seq, d_model] where depth > 0: recurse
       [*, seq, d_model]: Identity() -> out 
