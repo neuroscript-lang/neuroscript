@@ -22,7 +22,7 @@
 
 ### 2.1 Implement Shape Inference Engine ✅
 
-  - [x] Create src/shape_inference.rs module
+  - [x] Create src/shape/ module with inference engine
   - [x] Implement ShapeInferenceEngine struct
   - [x] Add shape constraint tracking from connections
   - [x] Implement dimension variable unification (e.g., d_model consistency)
@@ -68,14 +68,14 @@
 
 ### 3.1 Enhance Match Expression Support
 
-  - [ ] Implement compile-time match resolution for known shapes
-  - [ ] Support runtime match generation (Python if/elif) for dynamic shapes
-  - [ ] Add exhaustiveness checking for pattern coverage
+  - [x] Implement compile-time match resolution for known shapes
+  - [x] Support runtime match generation (Python if/elif) for dynamic shapes
+  - [x] Add exhaustiveness checking for pattern coverage
   - [ ] Implement dead branch elimination
-  - [ ] Create AdaptiveProjection example neuron
-  - [ ] Test compile-time pattern selection
+  - [x] Create AdaptiveProjection example neuron
+  - [x] Test compile-time pattern selection
   - [ ] Test runtime pattern fallback
-  - [ ] Validate exhaustiveness checking
+  - [x] Validate exhaustiveness checking
  
 ### 3.2 Pattern Matching Optimizations
 
