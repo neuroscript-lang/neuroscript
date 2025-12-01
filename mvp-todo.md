@@ -90,7 +90,7 @@
 
 ### 4.1 Complete Standard Library Definitions
 
-  - [ ] Complete TransformerBlock.ns with full residual connections
+  - [x] Complete TransformerBlock.ns with full residual connections
   - [ ] Implement MultiHeadAttention composite (not primitive)
   - [ ] Build FFN variants
   - [ ] Create TransformerStack composite

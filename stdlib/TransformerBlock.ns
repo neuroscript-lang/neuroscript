@@ -25,19 +25,19 @@ neuron TransformerBlock(d_model, num_heads, d_ff):
             attn_out
 
         # Add residual
-        # (skip1, attn_out) -> Add() -> attn_residual
+        (skip1, attn_out) -> Add() -> attn_residual
 
         # Second residual-forward with pre-norm
-        # attn_residual -> (skip2, ffn_path)
+        attn_residual -> (skip2, ffn_path)
 
-        # ffn_path
-        #     LayerNorm(d_model)
-        #     FFN(d_model, d_ff)
-        #     Dropout(0.1)
-        #     ffn_out
+        ffn_path ->
+            LayerNorm(d_model)
+            FFN(d_model, d_ff)
+            Dropout(0.1)
+            ffn_out
 
         # Add residual
-        # (skip2, ffn_out) -> Add() -> out
+        (skip2, ffn_out) -> Add() -> out
 
 
 # Post-norm Transformer Block (original "Attention is All You Need")
@@ -56,19 +56,19 @@ neuron PostNormTransformerBlock(d_model, num_heads, d_ff):
             Dropout(0.1)
             attn_out
 
-        # (skip1, attn_out) -> Add() -> attn_added
-        # attn_added -> LayerNorm(d_model) -> attn_normed
+        (skip1, attn_out) -> Add() -> attn_added
+        attn_added -> LayerNorm(d_model) -> attn_normed
 
         # Second residual-forward then norm
-        # attn_normed -> (skip2, ffn_path)
+        attn_normed -> (skip2, ffn_path)
 
-        # ffn_path
-        #     FFN(d_model, d_ff)
-        #     Dropout(0.1)
-        #     ffn_out
+        ffn_path ->
+            FFN(d_model, d_ff)
+            Dropout(0.1)
+            ffn_out
 
-        # (skip2, ffn_out) -> Add() -> ffn_added
-        # ffn_added -> LayerNorm(d_model) -> out
+        (skip2, ffn_out) -> Add() -> ffn_added
+        ffn_added -> LayerNorm(d_model) -> out
 
 
 # Transformer Encoder Block (bidirectional, BERT-style)
@@ -99,28 +99,29 @@ neuron TransformerDecoderBlock(d_model, num_heads, d_ff):
             Dropout(0.1)
             self_attn_out
 
-        # (skip1, self_attn_out) -> Add() -> after_self_attn
+        (skip1, self_attn_out) -> Add() -> after_self_attn
 
         # Cross-attention to encoder
-        # after_self_attn -> (skip2, cross_attn_q)
-        # (cross_attn_q, encoder_output)
-        #     LayerNorm()
-        #     MultiHeadCrossAttention(d_model, num_heads)
-        #     Dropout(0.1)
-        #     cross_attn_out
+        after_self_attn -> (skip2, cross_attn_q)
 
-        # (skip2, cross_attn_out) -> Add() -> after_cross_attn
+        (cross_attn_q, encoder_output) ->
+            LayerNorm()
+            MultiHeadCrossAttention(d_model, num_heads)
+            Dropout(0.1)
+            cross_attn_out
+
+        (skip2, cross_attn_out) -> Add() -> after_cross_attn
 
         # Feed-forward
-        # after_cross_attn -> (skip3, ffn_path)
+        after_cross_attn -> (skip3, ffn_path)
 
-        # ffn_path
-        #     LayerNorm(d_model)
-        #     FFN(d_model, d_ff)
-        #     Dropout(0.1)
-        #     ffn_out
+        ffn_path ->
+            LayerNorm(d_model)
+            FFN(d_model, d_ff)
+            Dropout(0.1)
+            ffn_out
 
-        # (skip3, ffn_out) -> Add() -> out
+        (skip3, ffn_out) -> Add() -> out
 
 
 # Simplified single-block transformer (for testing)
