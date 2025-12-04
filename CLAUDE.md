@@ -14,21 +14,55 @@ NeuroScript is a neural architecture composition language implemented in Rust. I
 # Build the project
 cargo build --release
 
-# Parse a file (prints IR structure: imports, neurons, connections)
-./target/release/neuroscript examples/residual.ns
+# ============================================================================
+# CLI: Parse, Validate, Compile, List
+# ============================================================================
 
-# Parse and validate (checks neuron existence, arity, cycles, shapes)
-./target/release/neuroscript --validate examples/residual.ns
+# Parse a file and show structure (quiet mode by default)
+./target/release/neuroscript parse examples/residual.ns
 
-# Generate PyTorch code for a specific neuron
-./target/release/neuroscript --codegen ResidualBlock examples/residual.ns
-# ... or write to file
-./target/release/neuroscript --codegen ResidualBlock --output residual.py examples/residual.ns
+# Parse with detailed IR structure output
+./target/release/neuroscript parse --verbose examples/residual.ns
 
-# CLI flags:
-# --validate         Run validation checks on the parsed program
-# --codegen <name>   Generate PyTorch code for the specified neuron
-# --output <file>    Write codegen output to file (stdout if omitted)
+# Validate a file (parse + validation checks)
+./target/release/neuroscript validate examples/residual.ns
+
+# Validate with detailed output
+./target/release/neuroscript validate --verbose examples/residual.ns
+
+# Compile to PyTorch
+# (auto-detects neuron name from filename, e.g., residual.ns → Residual)
+./target/release/neuroscript compile examples/residual.ns
+
+# Compile specific neuron
+./target/release/neuroscript compile examples/residual.ns --neuron ResidualBlock
+
+# Compile with output to file
+./target/release/neuroscript compile examples/residual.ns -o residual.py
+
+# Compile with verbose output (shows optimization stats)
+./target/release/neuroscript compile examples/residual.ns --verbose
+
+# Compile without optimizations
+./target/release/neuroscript compile examples/residual.ns --no-optimize
+
+# Disable dead branch elimination only (but keep pattern reordering)
+./target/release/neuroscript compile examples/residual.ns --no-dead-elim
+
+# List all neurons in a file
+./target/release/neuroscript list examples/residual.ns
+
+# List with connection details
+./target/release/neuroscript list --verbose examples/residual.ns
+
+# Get help for any command
+./target/release/neuroscript --help
+./target/release/neuroscript parse --help
+./target/release/neuroscript compile --help
+
+# ============================================================================
+# Testing
+# ============================================================================
 
 # Run all unit tests
 cargo test
@@ -60,6 +94,39 @@ cargo insta test --review            # Test and review in one step
 # Check without building (fast iteration)
 cargo check
 ```
+
+### CLI Subcommands
+
+The CLI uses clap with four main subcommands:
+
+**`parse <FILE>`**
+- Parse NeuroScript file and display IR structure
+- Quiet by default, use `-v/--verbose` to show detailed output
+- Useful for understanding the program structure
+
+**`validate <FILE>`**
+- Parse and validate program
+- Checks: neuron existence, connection arity, cycles, shape compatibility
+- Use `-v/--verbose` to see all details
+
+**`compile <FILE>`**
+- Full compilation pipeline: parse → validate → optimize → codegen
+- Auto-detects neuron name from filename (e.g., `residual.ns` → `Residual`)
+- Requires explicit `--neuron` if filename-based detection fails
+- Runs optimizations by default:
+  - Pattern reordering (reorder match arms for efficiency)
+  - Dead branch elimination (remove unreachable match arms)
+- Options:
+  - `-n, --neuron <NAME>`: Specify which neuron to compile
+  - `-o, --output <FILE>`: Write to file instead of stdout
+  - `--no-optimize`: Disable all optimizations
+  - `--no-dead-elim`: Disable dead branch elimination only
+  - `-v, --verbose`: Show optimization stats and detailed output
+
+**`list <FILE>`**
+- List all neurons in a file with signatures
+- Shows: name, kind (primitive/composite), inputs, outputs
+- Use `-v/--verbose` to see connection details
 
 ## Architecture: Five-Phase Compiler
 
