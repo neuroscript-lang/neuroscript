@@ -250,7 +250,7 @@ impl ShapeInferenceEngine {
         Ok(())
     }
 
-    fn check_connection(&self, conn: &Connection, ctx: &mut InferenceContext, program: &Program) -> Result<(), ShapeError> {
+    pub fn check_connection(&self, conn: &Connection, ctx: &mut InferenceContext, program: &Program) -> Result<(), ShapeError> {
         // Build connection context for better error messages
         let conn_context = format!("{} -> {}",
             self.format_endpoint(&conn.source),

@@ -30,27 +30,27 @@
 **Recommended**: Option A (most flexible, user-facing)
 
 **Tasks**:
-- [ ] Create stdlib/primitives/ directory
-- [ ] Define signatures for core primitives:
-  - [ ] Linear.ns - `in: [*, in_dim], out: [*, out_dim]`
-  - [ ] GELU.ns, ReLU.ns, etc. - `in: [*shape], out: [*shape]`
-  - [ ] LayerNorm.ns - `in: [*, dim], out: [*, dim]`
-  - [ ] Dropout.ns - `in: [*shape], out: [*shape]`
-  - [ ] Softmax.ns - `in: [*, dim], out: [*, dim]`
-  - [ ] ScaledDotProductAttention.ns - proper Q/K/V signatures
-  - [ ] All other primitives from StdlibRegistry (30+ total)
-- [ ] Load primitive definitions automatically with stdlib
-- [ ] Test that primitives have proper shape validation
+- [x] Create stdlib/primitives/ directory
+- [x] Define signatures for core primitives:
+  - [x] Linear.ns - `in: [*, in_dim], out: [*, out_dim]`
+  - [x] GELU.ns, ReLU.ns, etc. - `in: [*shape], out: [*shape]`
+  - [x] LayerNorm.ns - `in: [*, dim], out: [*, dim]`
+  - [x] Dropout.ns - `in: [*shape], out: [*shape]`
+  - [x] Softmax.ns - `in: [*, dim], out: [*, dim]`
+  - [x] ScaledDotProductAttention.ns - proper Q/K/V signatures
+  - [x] All other primitives from StdlibRegistry (30+ total)
+- [x] Load primitive definitions automatically with stdlib
+- [x] Test that primitives have proper shape validation
 
 **Acceptance Criteria**: `SimpleModel` using `Linear -> GELU -> Linear` validates without port mismatches
 
 ### 1.3 Update Integration Tests
 **Why**: Snapshot test is failing due to validator changes
 **Tasks**:
-- [ ] Review snapshot diff for `example_28-let_set_basic`
-- [ ] Run `cargo insta review` and accept/reject changes
-- [ ] Ensure all 10 integration tests pass
-- [ ] Add new integration test for stdlib loading
+- [x] Review snapshot diff for `example_28-let_set_basic`
+- [x] Run `cargo insta review` and accept/reject changes
+- [x] Ensure all 10 integration tests pass
+- [x] Add new integration test for stdlib loading
 
 **Acceptance Criteria**: `cargo test --test integration_tests` passes 100%
 

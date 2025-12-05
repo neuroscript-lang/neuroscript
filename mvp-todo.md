@@ -114,22 +114,28 @@
 
 ## MVP Phase 5: Enhanced Codegen
 
-### 5.1 Shape-Aware Code Generation
+### 5.1 Shape-Aware Code Generation ✅
 
-  - [ ] Emit shape assertions in forward()
-  - [ ] based on inferred shapes
-  - [ ] Optimize based on static shapes (fixed-size operations)
-  - [ ] Add inferred shape documentation in generated code comments
-  - [ ] Test generated code includes proper assertions
-  - [ ] Validate shape documentation is accurate
+  - [x] Emit shape assertions in forward()
+  - [x] based on inferred shapes
+  - [x] Optimize based on static shapes (fixed-size operations)
+  - [x] Add inferred shape documentation in generated code comments
+  - [x] Test generated code includes proper assertions
+  - [x] Validate shape documentation is accurate
+
+**Status**: Complete! Shape inference now runs during codegen and:
+- Emits shape documentation comments for all operations
+- Generates runtime assertions for concrete shapes (parameters, literals)
+- Skips assertions for wildcards and unresolved dimensions
+- Example output shows `# Linear() output shape: [*, out_dim]` comments
  
 ### 5.2 Recursive Dependency Resolution
 
-  - [ ] Generate all dependencies recursively
-  - [ ] Implement topological sort for correct order
-  - [ ] Emit all classes in single Python file
-  - [ ] Test dependency resolution with complex graphs
-  - [ ] Validate generated code order is correct
+  - [x] Generate all dependencies recursively
+  - [x] Implement topological sort for correct order
+  - [x] Emit all classes in single Python file
+  - [x] Test dependency resolution with complex graphs
+  - [x] Validate generated code order is correct
  
 ### 5.3 Composite Neuron Handling
 

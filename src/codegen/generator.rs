@@ -21,8 +21,8 @@ impl std::fmt::Display for CodegenError {
 impl std::error::Error for CodegenError {}
 
 impl<'a> CodeGenerator<'a> {
-    /// Create a new code generator
-    pub(crate) fn new(program: &'a Program) -> Self {
+    /// Create a new code generator with an optional inference context
+    pub(crate) fn new(program: &'a Program, inference_ctx: InferenceContext) -> Self {
         Self {
             program,
             registry: StdlibRegistry::new(),
@@ -33,6 +33,7 @@ impl<'a> CodeGenerator<'a> {
             current_neuron_params: HashSet::new(),
             binding_context: std::collections::HashMap::new(),
             lazy_bindings: std::collections::HashMap::new(),
+            inference_ctx,
         }
     }
 
@@ -125,41 +126,177 @@ impl<'a> CodeGenerator<'a> {
         Ok(())
     }
 
-    /// Generate imports
-    fn generate_imports(&self) -> String {
-        let mut output = String::new();
+}
 
-        writeln!(output, "import torch").unwrap();
-        writeln!(output, "import torch.nn as nn").unwrap();
+/// Collect all composite neuron dependencies recursively
+fn collect_dependencies(
+    neuron_name: &str,
+    program: &Program,
+    visited: &mut HashSet<String>,
+    result: &mut Vec<String>,
+) -> Result<(), CodegenError> {
+    // Skip if already visited
+    if visited.contains(neuron_name) {
+        return Ok(());
+    }
+    visited.insert(neuron_name.to_string());
 
-        // Generate imports for used primitives
-        let primitives: Vec<String> = self.used_primitives.iter().cloned().collect();
-        let imports = self.registry.generate_imports(&primitives);
+    // Get the neuron definition
+    let neuron = program.neurons.get(neuron_name)
+        .ok_or_else(|| CodegenError::NeuronNotFound(neuron_name.to_string()))?;
 
-        for import in imports {
-            writeln!(output, "{}", import).unwrap();
+    // Only process composite neurons (primitives are just imports)
+    if let NeuronBody::Graph { let_bindings, set_bindings, connections } = &neuron.body {
+        // Collect all called neuron names from bindings and connections
+        let mut called_neurons = HashSet::new();
+
+        // Collect from set bindings
+        for binding in set_bindings {
+            called_neurons.insert(binding.call_name.clone());
         }
 
-        writeln!(output).unwrap();
-        output
+        // Collect from let bindings
+        for binding in let_bindings {
+            called_neurons.insert(binding.call_name.clone());
+        }
+
+        // Collect from connections
+        collect_calls_from_connections(connections, &mut called_neurons);
+
+        // Recursively collect dependencies (depth-first)
+        for called_name in called_neurons {
+            // Check if it's a composite neuron in the program
+            if let Some(neuron_def) = program.neurons.get(&called_name) {
+                if !neuron_def.is_primitive() {
+                    // Recursively collect dependencies of this composite neuron
+                    collect_dependencies(&called_name, program, visited, result)?;
+                }
+            }
+            // If not in program, it's assumed to be a primitive (ignore)
+        }
+
+        // Add this neuron to the result after its dependencies
+        result.push(neuron_name.to_string());
+    }
+
+    Ok(())
+}
+
+/// Collect all neuron names called in connections
+fn collect_calls_from_connections(connections: &[Connection], result: &mut HashSet<String>) {
+    for conn in connections {
+        collect_calls_from_endpoint(&conn.source, result);
+        collect_calls_from_endpoint(&conn.destination, result);
+    }
+}
+
+/// Recursively collect neuron names from an endpoint
+fn collect_calls_from_endpoint(endpoint: &Endpoint, result: &mut HashSet<String>) {
+    match endpoint {
+        Endpoint::Call { name, .. } => {
+            result.insert(name.clone());
+        }
+        Endpoint::Tuple(_port_refs) => {
+            // Tuples contain PortRef, not Endpoint - they don't call neurons
+        }
+        Endpoint::Match(match_expr) => {
+            for arm in &match_expr.arms {
+                for ep in &arm.pipeline {
+                    collect_calls_from_endpoint(ep, result);
+                }
+            }
+        }
+        Endpoint::Ref(_) => {
+            // Port references don't call neurons
+        }
     }
 }
 
 /// Generate PyTorch code for a specific neuron (PUBLIC API)
 pub fn generate_pytorch(program: &Program, neuron_name: &str) -> Result<String, CodegenError> {
-    let neuron = program.neurons.get(neuron_name)
+    // Verify the requested neuron exists
+    let _neuron = program.neurons.get(neuron_name)
         .ok_or_else(|| CodegenError::NeuronNotFound(neuron_name.to_string()))?;
 
-    let mut generator = CodeGenerator::new(program);
+    // Collect all composite dependencies in topological order
+    let mut visited = HashSet::new();
+    let mut dependencies = Vec::new();
+    collect_dependencies(neuron_name, program, &mut visited, &mut dependencies)?;
 
-    // First pass: generate neuron code to collect dependencies
-    let neuron_code = generator.generate_neuron(neuron)?;
+    // Generate code for all dependencies in order
+    let mut all_code = String::new();
+    let mut all_primitives = HashSet::new();
 
-    // Generate imports based on used primitives
-    let imports = generator.generate_imports();
+    for dep_name in &dependencies {
+        let neuron = program.neurons.get(dep_name).unwrap(); // Safe because we just collected it
 
-    // Combine imports and code
-    Ok(format!("{}{}", imports, neuron_code))
+        // Run shape inference for this neuron
+        let inference_ctx = run_shape_inference_for_neuron(neuron, program);
+        let mut generator = CodeGenerator::new(program, inference_ctx);
+
+        // Generate neuron code
+        let neuron_code = generator.generate_neuron(neuron)?;
+        all_code.push_str(&neuron_code);
+        all_code.push('\n');
+
+        // Collect primitives used
+        all_primitives.extend(generator.used_primitives);
+    }
+
+    // Generate imports based on all used primitives
+    let registry = StdlibRegistry::new();
+    let mut imports_output = String::new();
+    writeln!(imports_output, "import torch").unwrap();
+    writeln!(imports_output, "import torch.nn as nn").unwrap();
+
+    let primitives: Vec<String> = all_primitives.iter().cloned().collect();
+    let imports = registry.generate_imports(&primitives);
+    for import in imports {
+        writeln!(imports_output, "{}", import).unwrap();
+    }
+    writeln!(imports_output).unwrap();
+
+    // Combine imports and all neuron code
+    Ok(format!("{}{}", imports_output, all_code))
+}
+
+/// Run shape inference for a single neuron and return the inference context
+/// This provides resolved dimensions and node output shapes for code generation
+fn run_shape_inference_for_neuron(neuron: &NeuronDef, program: &Program) -> InferenceContext {
+    use crate::shape::ShapeInferenceEngine;
+
+    // Create a new inference context
+    let mut ctx = InferenceContext::new();
+
+    // Initialize context with neuron parameters (if they have defaults)
+    for param in &neuron.params {
+        if let Some(Value::Int(val)) = param.default {
+            ctx.resolved_dims.insert(param.name.clone(), val as usize);
+        }
+    }
+
+    // Register input shapes
+    let input_shapes: Vec<Shape> = neuron.inputs.iter().map(|p| p.shape.clone()).collect();
+    ctx.node_outputs.insert("in".to_string(), input_shapes);
+
+    // Register individual named input ports
+    for port in &neuron.inputs {
+        if port.name != "default" {
+            ctx.node_outputs.insert(port.name.clone(), vec![port.shape.clone()]);
+        }
+    }
+
+    // If this is a composite neuron, run inference on its connections
+    if let NeuronBody::Graph { connections, .. } = &neuron.body {
+        let engine = ShapeInferenceEngine::new();
+        // Process each connection to populate the context
+        for conn in connections {
+            // Attempt to check connection (ignore errors - this is best-effort for codegen)
+            let _ = engine.check_connection(conn, &mut ctx, program);
+        }
+    }
+
+    ctx
 }
 
 #[cfg(test)]
@@ -169,20 +306,9 @@ mod tests {
     #[test]
     fn test_generator_new() {
         let program = Program::new();
-        let gen = CodeGenerator::new(&program);
+        let ctx = InferenceContext::new();
+        let gen = CodeGenerator::new(&program, ctx);
         assert_eq!(gen.node_counter, 0);
         assert!(gen.used_primitives.is_empty());
-    }
-
-    #[test]
-    fn test_generate_imports() {
-        let program = Program::new();
-        let mut gen = CodeGenerator::new(&program);
-        gen.used_primitives.insert("Linear".to_string());
-        gen.used_primitives.insert("GELU".to_string());
-
-        let imports = gen.generate_imports();
-        assert!(imports.contains("import torch"));
-        assert!(imports.contains("import torch.nn as nn"));
     }
 }

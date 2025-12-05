@@ -193,6 +193,130 @@ impl<'a> CodeGenerator<'a> {
         self.node_counter += 1;
         id
     }
+
+    /// Format a shape for use in a Python assertion
+    /// Converts [batch, seq, dim] to a tuple expression like (batch, seq, dim)
+    /// Returns None if the shape contains wildcards or other non-concrete dimensions
+    pub(super) fn format_shape_for_assertion(&self, shape: &Shape) -> Option<String> {
+        let mut dims = Vec::new();
+
+        for dim in &shape.dims {
+            let dim_str = match dim {
+                Dim::Literal(n) => n.to_string(),
+                Dim::Named(name) => {
+                    // Check if this is resolved in the inference context
+                    if let Some(value) = self.inference_ctx.resolved_dims.get(name) {
+                        value.to_string()
+                    } else if self.current_neuron_params.contains(name) {
+                        // It's a parameter - use self.param
+                        format!("self.{}", name)
+                    } else {
+                        // Not resolved - can't create concrete assertion
+                        return None;
+                    }
+                }
+                Dim::Wildcard => return None,  // Can't assert on wildcard
+                Dim::Variadic(_) => return None,  // Can't assert on variadic
+                Dim::Expr(expr) => {
+                    // Try to evaluate the expression
+                    if let Some(value) = self.inference_ctx.evaluate_expr(expr) {
+                        value.to_string()
+                    } else {
+                        // Build expression with parameters
+                        format!("({})", self.value_to_python_with_self(&Value::BinOp {
+                            op: expr.op,
+                            left: Box::new(dim_to_value(&expr.left)),
+                            right: Box::new(dim_to_value(&expr.right)),
+                        }))
+                    }
+                }
+            };
+            dims.push(dim_str);
+        }
+
+        Some(format!("({})", dims.join(", ")))
+    }
+
+    /// Format a shape for use in a comment
+    /// Converts [batch, seq, dim] to a readable string like [batch, seq, dim]
+    pub(super) fn format_shape_for_comment(&self, shape: &Shape) -> String {
+        let dims: Vec<String> = shape.dims.iter().map(|dim| {
+            match dim {
+                Dim::Literal(n) => n.to_string(),
+                Dim::Named(name) => {
+                    if let Some(value) = self.inference_ctx.resolved_dims.get(name) {
+                        format!("{}={}", name, value)
+                    } else {
+                        name.clone()
+                    }
+                }
+                Dim::Wildcard => "*".to_string(),
+                Dim::Variadic(name) => format!("*{}", name),
+                Dim::Expr(expr) => {
+                    format!("{}", expr.left) + match expr.op {
+                        BinOp::Add => " + ",
+                        BinOp::Sub => " - ",
+                        BinOp::Mul => " * ",
+                        BinOp::Div => " / ",
+                        _ => " ? ",
+                    } + &format!("{}", expr.right)
+                }
+            }
+        }).collect();
+
+        format!("[{}]", dims.join(", "))
+    }
+
+    /// Check if a shape should have a runtime assertion
+    /// Returns true if the shape is concrete enough to assert on
+    pub(super) fn should_assert_shape(&self, shape: &Shape) -> bool {
+        // Don't assert if shape has wildcards or variadics
+        if shape.dims.iter().any(|d| matches!(d, Dim::Wildcard | Dim::Variadic(_))) {
+            return false;
+        }
+
+        // Don't assert on empty shapes
+        if shape.dims.is_empty() {
+            return false;
+        }
+
+        // Check if all dimensions are either:
+        // - Literals
+        // - Named dimensions that are resolved or are parameters
+        // - Expressions that can be evaluated or converted to Python
+        for dim in &shape.dims {
+            match dim {
+                Dim::Literal(_) => continue,
+                Dim::Named(name) => {
+                    if !self.inference_ctx.resolved_dims.contains_key(name)
+                       && !self.current_neuron_params.contains(name) {
+                        return false;  // Unresolved dimension
+                    }
+                }
+                Dim::Expr(_) => {
+                    // We can try to generate an expression assertion
+                    continue;
+                }
+                _ => return false,
+            }
+        }
+
+        true
+    }
+}
+
+/// Convert a Dim to a Value for expression building
+fn dim_to_value(dim: &Dim) -> Value {
+    match dim {
+        Dim::Literal(n) => Value::Int(*n),
+        Dim::Named(name) => Value::Name(name.clone()),
+        Dim::Expr(expr) => Value::BinOp {
+            op: expr.op,
+            left: Box::new(dim_to_value(&expr.left)),
+            right: Box::new(dim_to_value(&expr.right)),
+        },
+        _ => Value::Name("None".to_string()),  // Shouldn't happen
+    }
 }
 
 #[cfg(test)]

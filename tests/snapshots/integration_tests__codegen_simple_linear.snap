@@ -13,4 +13,5 @@ class SimpleLinear(nn.Module):
 
     def forward(self, x):
         x0 = self.linear_0(x)
+        # Linear() output shape: [*, out_dim]
         return x0

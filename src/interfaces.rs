@@ -118,6 +118,10 @@ pub struct CodeGenerator<'a> {
 
     /// Lazy bindings from let: blocks (name -> (call_name, args, kwargs))
     pub lazy_bindings: HashMap<String, (String, Vec<Value>, Vec<(String, Value)>)>,
+
+    /// Shape inference context (resolved dimensions and node output shapes)
+    /// Used for emitting shape assertions and documentation
+    pub inference_ctx: InferenceContext,
 }
 
 /// An input or output port of a neuron

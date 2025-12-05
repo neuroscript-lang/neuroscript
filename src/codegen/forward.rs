@@ -9,6 +9,37 @@ use crate::interfaces::*;
 use std::collections::HashMap;
 use std::fmt::Write;
 
+/// Emit a shape comment and optional assertion for a variable
+fn emit_shape_comment_and_assertion(
+    gen: &CodeGenerator,
+    output: &mut String,
+    var_name: &str,
+    node_name: &str,
+    indent: &str,
+) {
+    // Try to get the inferred shape for this node
+    if let Some(shapes) = gen.inference_ctx.node_outputs.get(node_name) {
+        if !shapes.is_empty() {
+            let shape = &shapes[0];  // Use first shape for now
+
+            // Emit comment showing expected shape
+            let shape_comment = gen.format_shape_for_comment(shape);
+            writeln!(output, "{}# Expected shape: {}", indent, shape_comment).unwrap();
+
+            // Emit assertion if shape is concrete enough
+            if gen.should_assert_shape(shape) {
+                if let Some(expected_shape) = gen.format_shape_for_assertion(shape) {
+                    writeln!(
+                        output,
+                        "{}assert {}.shape == {}, f\"Shape mismatch: expected {}, got {{{}.shape}}\"",
+                        indent, var_name, expected_shape, shape_comment, var_name
+                    ).unwrap();
+                }
+            }
+        }
+    }
+}
+
 /// Generate forward method body from connections
 pub(super) fn generate_forward_body(
     gen: &mut CodeGenerator,
@@ -175,6 +206,12 @@ fn process_destination(
             // Simple port reference - the source becomes this port's variable
             gen.var_names
                 .insert(port_ref.node.clone(), source_var.clone());
+
+            // Emit shape comment/assertion for intermediate nodes
+            if port_ref.node != "in" && port_ref.node != "out" {
+                emit_shape_comment_and_assertion(gen, output, &source_var, &port_ref.node, indent);
+            }
+
             Ok(source_var)
         }
         Endpoint::Tuple(refs) => {
@@ -200,7 +237,7 @@ fn process_destination(
             Ok(source_var) // Return tuple as result
         }
         Endpoint::Call {
-            name, args, kwargs, ..
+            name, args, kwargs, id
         } => {
             // Generate a call to the module
             let key = endpoint_key_impl(endpoint);
@@ -275,6 +312,26 @@ fn process_destination(
                     indent, result_var, module_name, source_var
                 )
                 .unwrap();
+            }
+
+            // Emit shape comment/assertion for the call result
+            // Look up the output shape from call_outputs using the call ID
+            if let Some(shapes) = gen.inference_ctx.call_outputs.get(id) {
+                if !shapes.is_empty() {
+                    let shape = &shapes[0];
+                    let shape_comment = gen.format_shape_for_comment(shape);
+                    writeln!(output, "{}# {}() output shape: {}", indent, name, shape_comment).unwrap();
+
+                    if gen.should_assert_shape(shape) {
+                        if let Some(expected_shape) = gen.format_shape_for_assertion(shape) {
+                            writeln!(
+                                output,
+                                "{}assert {}.shape == {}, f\"{}() shape mismatch: expected {}, got {{{}.shape}}\"",
+                                indent, result_var, expected_shape, name, shape_comment, result_var
+                            ).unwrap();
+                        }
+                    }
+                }
             }
 
             Ok(result_var)
@@ -473,7 +530,8 @@ mod tests {
     #[test]
     fn test_shape_check_literals() {
         let program = Program::new();
-        let gen = CodeGenerator::new(&program);
+        let ctx = InferenceContext::new();
+        let gen = CodeGenerator::new(&program, ctx);
 
         let shape = Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]);
 
@@ -486,7 +544,8 @@ mod tests {
     #[test]
     fn test_shape_check_with_capture() {
         let program = Program::new();
-        let gen = CodeGenerator::new(&program);
+        let ctx = InferenceContext::new();
+        let gen = CodeGenerator::new(&program, ctx);
 
         let shape = Shape::new(vec![Dim::Wildcard, Dim::Named("d".to_string())]);
 
@@ -499,7 +558,8 @@ mod tests {
     #[test]
     fn test_shape_check_with_guard() {
         let program = Program::new();
-        let gen = CodeGenerator::new(&program);
+        let ctx = InferenceContext::new();
+        let gen = CodeGenerator::new(&program, ctx);
 
         let shape = Shape::new(vec![Dim::Wildcard, Dim::Named("d".to_string())]);
 

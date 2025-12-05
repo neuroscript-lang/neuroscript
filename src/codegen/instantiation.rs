@@ -176,7 +176,8 @@ mod tests {
     #[test]
     fn test_module_instantiation_simple() {
         let program = Program::new();
-        let mut gen = CodeGenerator::new(&program);
+        let ctx = InferenceContext::new();
+        let mut gen = CodeGenerator::new(&program, ctx);
 
         // Simple connection with a Call
         let connections = vec![
@@ -200,7 +201,8 @@ mod tests {
     #[test]
     fn test_module_deduplication() {
         let program = Program::new();
-        let mut gen = CodeGenerator::new(&program);
+        let ctx = InferenceContext::new();
+        let mut gen = CodeGenerator::new(&program, ctx);
 
         // Two calls with same signature should deduplicate
         let connections = vec![
@@ -234,7 +236,8 @@ mod tests {
     #[test]
     fn test_lazy_instantiation_marker() {
         let program = Program::new();
-        let mut gen = CodeGenerator::new(&program);
+        let ctx = InferenceContext::new();
+        let mut gen = CodeGenerator::new(&program, ctx);
 
         // Call with captured dimension
         let connections = vec![
