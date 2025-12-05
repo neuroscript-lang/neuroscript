@@ -129,23 +129,37 @@
 - Skips assertions for wildcards and unresolved dimensions
 - Example output shows `# Linear() output shape: [*, out_dim]` comments
  
-### 5.2 Recursive Dependency Resolution
+### 5.2 Recursive Dependency Resolution ✅
 
   - [x] Generate all dependencies recursively
   - [x] Implement topological sort for correct order
   - [x] Emit all classes in single Python file
   - [x] Test dependency resolution with complex graphs
   - [x] Validate generated code order is correct
- 
-### 5.3 Composite Neuron Handling
 
-  - [ ] Detect composite vs primitive neurons
-  - [ ] Generate nested modules for composites
-  - [ ] Import only primitives from runtime
-  - [ ] Test composite generation
-  - [ ] Validate imports are minimal and correct
+**Status**: Complete! Implementation in `src/codegen/generator.rs`:
+- `collect_dependencies()` uses post-order DFS for topological sort
+- Tested with `examples/dependency_chain_test.ns` (linear dependencies)
+- Tested with `examples/diamond_dependency_test.ns` (shared dependency)
+- Dependencies correctly emitted before dependents
+- Deduplication prevents duplicate class generation
 
-**Deliverable**: Generate complete, self-contained PyTorch modules
+### 5.3 Composite Neuron Handling ✅
+
+  - [x] Detect composite vs primitive neurons
+  - [x] Generate nested modules for composites
+  - [x] Import only primitives from runtime
+  - [x] Test composite generation
+  - [x] Validate imports are minimal and correct
+
+**Status**: Complete! Implementation verified:
+- `NeuronDef::is_primitive()` correctly distinguishes primitive/composite
+- Composite neurons generated as Python classes in output file
+- Only primitives imported from `neuroscript_runtime.primitives.*`
+- `StdlibRegistry::generate_imports()` deduplicates and sorts imports
+- Verified with dependency test examples (only primitives in imports)
+
+**Deliverable**: Generate complete, self-contained PyTorch modules ✅
 
 ## MVP Phase 6: End-to-End Validation
 
