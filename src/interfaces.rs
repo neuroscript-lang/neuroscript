@@ -3,10 +3,10 @@
 //! The IR is a graph of neuron instantiations with typed edges.
 //! Every connection carries a shape contract.
 
-use std::collections::{HashMap, HashSet};
-use miette::SourceSpan;
-use thiserror::Error;
 use miette::Diagnostic;
+use miette::SourceSpan;
+use std::collections::{HashMap, HashSet};
+use thiserror::Error;
 
 /// A dimension in a tensor shape
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -71,14 +71,12 @@ pub struct Shape {
     pub dims: Vec<Dim>,
 }
 
-
 #[derive(Debug)]
 pub enum CodegenError {
     NeuronNotFound(String),
     InvalidConnection(String),
     UnsupportedFeature(String),
 }
-
 
 /// Result of shape check generation containing condition and dimension bindings
 #[derive(Debug)]
@@ -158,7 +156,6 @@ pub struct PortRef {
     pub port: String, // "default" if not specified
 }
 
-
 /// An endpoint in a connection
 #[derive(Debug, Clone, PartialEq)]
 pub enum Endpoint {
@@ -203,13 +200,32 @@ pub struct MatchExpr {
 
 // ImplRef is already defined above as a struct
 
-/// A binding in a let: or set: block
+/// Scope of a binding
+#[derive(Debug, Clone, PartialEq)]
+pub enum Scope {
+    /// Instance-level (default), unique to each neuron instance
+    Instance { lazy: bool },
+    /// Static (class-level), shared across all instances of a neuron type
+    Static,
+    /// Global (module-level), shared across the entire module
+    Global,
+}
+
+/// A binding in a let: or set: block, or context: block
 #[derive(Debug, Clone, PartialEq)]
 pub struct Binding {
     pub name: String,
     pub call_name: String,
     pub args: Vec<Value>,
     pub kwargs: Vec<(String, Value)>,
+    pub scope: Scope, // Added scope
+}
+
+/// A module-level global definition: @global name = Value
+#[derive(Debug, Clone, PartialEq)]
+pub struct GlobalBinding {
+    pub name: String,
+    pub value: Value,
 }
 
 /// The body of a neuron definition
@@ -219,8 +235,9 @@ pub enum NeuronBody {
     Primitive(ImplRef),
     /// Composite: defined by internal graph
     Graph {
-        let_bindings: Vec<Binding>,
-        set_bindings: Vec<Binding>,
+        let_bindings: Vec<Binding>, // Deprecated, kept for parsing let/set blocks
+        set_bindings: Vec<Binding>, // Deprecated, kept for parsing let/set blocks
+        context_bindings: Vec<Binding>, // New unified bindings
         connections: Vec<Connection>,
     },
 }
@@ -256,6 +273,7 @@ pub struct UseStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
     pub uses: Vec<UseStmt>,
+    pub globals: Vec<GlobalBinding>, // Module-level globals
     pub neurons: HashMap<String, NeuronDef>,
 }
 
@@ -275,8 +293,14 @@ pub enum TokenKind {
     External,
     And,
     Or,
-    Let,
-    Set,
+    Let, // Deprecated
+    Set, // Deprecated
+    Context,
+
+    // Annotations
+    AtStatic, // @static
+    AtGlobal, // @global
+    AtLazy,   // @lazy
 
     // Literals
     Int(i64),
@@ -289,27 +313,27 @@ pub enum TokenKind {
     Ident(String),
 
     // Operators
-    Arrow,      // ->
-    Colon,      // :
-    Comma,      // ,
-    Dot,        // .
-    Slash,      // /
-    Star,       // *
-    Plus,       // +
-    Minus,      // -
-    Eq,         // ==
-    Ne,         // !=
-    Lt,         // <
-    Gt,         // >
-    Le,         // <=
-    Ge,         // >=
-    Assign,     // =
+    Arrow,  // ->
+    Colon,  // :
+    Comma,  // ,
+    Dot,    // .
+    Slash,  // /
+    Star,   // *
+    Plus,   // +
+    Minus,  // -
+    Eq,     // ==
+    Ne,     // !=
+    Lt,     // <
+    Gt,     // >
+    Le,     // <=
+    Ge,     // >=
+    Assign, // =
 
     // Delimiters
-    LParen,     // (
-    RParen,     // )
-    LBracket,   // [
-    RBracket,   // ]
+    LParen,   // (
+    RParen,   // )
+    LBracket, // [
+    RBracket, // ]
 
     // Structure
     Newline,
@@ -456,10 +480,18 @@ pub struct InferenceContext {
 #[derive(Debug, Error)]
 pub enum ShapeError {
     #[error("Shape mismatch: expected {expected}, got {got}")]
-    Mismatch { expected: Shape, got: Shape, context: String },
+    Mismatch {
+        expected: Shape,
+        got: Shape,
+        context: String,
+    },
 
     #[error("Dimension mismatch: expected {expected}, got {got}")]
-    DimMismatch { expected: Dim, got: Dim, context: String },
+    DimMismatch {
+        expected: Dim,
+        got: Dim,
+        context: String,
+    },
 
     #[error("Unknown dimension variable: {name}")]
     UnknownDim { name: String, context: String },
@@ -552,32 +584,69 @@ impl std::fmt::Display for ValidationError {
             ValidationError::MissingNeuron { name, context } => {
                 write!(f, "Neuron '{}' not found (in {})", name, context)
             }
-            ValidationError::PortMismatch { source_ports, dest_ports, context, details } => {
-                write!(f, "Port mismatch: {} -> {} (in {}: {})",
-                       source_ports, dest_ports, context, details)
+            ValidationError::PortMismatch {
+                source_ports,
+                dest_ports,
+                context,
+                details,
+            } => {
+                write!(
+                    f,
+                    "Port mismatch: {} -> {} (in {}: {})",
+                    source_ports, dest_ports, context, details
+                )
             }
             ValidationError::CycleDetected { cycle, context } => {
                 write!(f, "Cycle detected in {}: {}", context, cycle.join(" -> "))
             }
-            ValidationError::ArityMismatch { expected, got, context } => {
-                write!(f, "Arity mismatch: expected {} ports, got {} (in {})",
-                       expected, got, context)
+            ValidationError::ArityMismatch {
+                expected,
+                got,
+                context,
+            } => {
+                write!(
+                    f,
+                    "Arity mismatch: expected {} ports, got {} (in {})",
+                    expected, got, context
+                )
             }
             ValidationError::UnknownNode { node, context } => {
                 write!(f, "Unknown node '{}' (in {})", node, context)
             }
-            ValidationError::NonExhaustiveMatch { context, suggestion } => {
-                write!(f, "Non-exhaustive match expression (in {}): {}", context, suggestion)
+            ValidationError::NonExhaustiveMatch {
+                context,
+                suggestion,
+            } => {
+                write!(
+                    f,
+                    "Non-exhaustive match expression (in {}): {}",
+                    context, suggestion
+                )
             }
-            ValidationError::UnreachableMatchArm { arm_index, shadowed_by, context } => {
-                write!(f, "Unreachable match arm {} shadowed by arm {} (in {})",
-                       arm_index, shadowed_by, context)
+            ValidationError::UnreachableMatchArm {
+                arm_index,
+                shadowed_by,
+                context,
+            } => {
+                write!(
+                    f,
+                    "Unreachable match arm {} shadowed by arm {} (in {})",
+                    arm_index, shadowed_by, context
+                )
             }
             ValidationError::DuplicateBinding { name, neuron } => {
                 write!(f, "Duplicate binding '{}' in neuron '{}'", name, neuron)
             }
-            ValidationError::InvalidRecursion { binding, neuron, reason } => {
-                write!(f, "Invalid recursion in binding '{}' of neuron '{}': {}", binding, neuron, reason)
+            ValidationError::InvalidRecursion {
+                binding,
+                neuron,
+                reason,
+            } => {
+                write!(
+                    f,
+                    "Invalid recursion in binding '{}' of neuron '{}': {}",
+                    binding, neuron, reason
+                )
             }
             ValidationError::Custom(msg) => {
                 write!(f, "{}", msg)

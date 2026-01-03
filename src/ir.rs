@@ -3,8 +3,8 @@
 //! The IR is a graph of neuron instantiations with typed edges.
 //! Every connection carries a shape contract.
 
-use std::collections::HashMap;
 use crate::interfaces::*;
+use std::collections::HashMap;
 
 impl Shape {
     pub fn scalar() -> Self {
@@ -46,6 +46,7 @@ impl Program {
     pub fn new() -> Self {
         Program {
             uses: vec![],
+            globals: vec![],
             neurons: HashMap::new(),
         }
     }

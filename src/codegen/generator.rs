@@ -3,10 +3,10 @@
 //! Orchestrates the generation of Python nn.Module classes from
 //! NeuroScript neuron definitions.
 
+use super::{forward, instantiation};
+use crate::interfaces::*;
 use std::collections::HashSet;
 use std::fmt::Write;
-use crate::interfaces::*;
-use super::{instantiation, forward};
 
 impl std::fmt::Display for CodegenError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -57,18 +57,26 @@ impl<'a> CodeGenerator<'a> {
     }
 
     /// Generate __init__ method
-    fn generate_init(&mut self, output: &mut String, neuron: &NeuronDef) -> Result<(), CodegenError> {
+    fn generate_init(
+        &mut self,
+        output: &mut String,
+        neuron: &NeuronDef,
+    ) -> Result<(), CodegenError> {
         // Build parameter list
         let params = if neuron.params.is_empty() {
             "self".to_string()
         } else {
-            let param_strs: Vec<String> = neuron.params.iter().map(|p| {
-                if let Some(default) = &p.default {
-                    format!("{}={}", p.name, self.value_to_python(default))
-                } else {
-                    p.name.clone()
-                }
-            }).collect();
+            let param_strs: Vec<String> = neuron
+                .params
+                .iter()
+                .map(|p| {
+                    if let Some(default) = &p.default {
+                        format!("{}={}", p.name, self.value_to_python(default))
+                    } else {
+                        p.name.clone()
+                    }
+                })
+                .collect();
             format!("self, {}", param_strs.join(", "))
         };
 
@@ -85,9 +93,20 @@ impl<'a> CodeGenerator<'a> {
                 // Primitives don't instantiate sub-modules
                 writeln!(output, "        pass").unwrap();
             }
-            NeuronBody::Graph { let_bindings, set_bindings, connections } => {
+            NeuronBody::Graph {
+                let_bindings,
+                set_bindings,
+                connections,
+                ..
+            } => {
                 // Instantiate all called neurons as modules
-                instantiation::generate_module_instantiations(self, output, let_bindings, set_bindings, connections)?;
+                instantiation::generate_module_instantiations(
+                    self,
+                    output,
+                    let_bindings,
+                    set_bindings,
+                    connections,
+                )?;
             }
         }
 
@@ -95,12 +114,18 @@ impl<'a> CodeGenerator<'a> {
     }
 
     /// Generate forward method
-    fn generate_forward(&mut self, output: &mut String, neuron: &NeuronDef) -> Result<(), CodegenError> {
+    fn generate_forward(
+        &mut self,
+        output: &mut String,
+        neuron: &NeuronDef,
+    ) -> Result<(), CodegenError> {
         // Determine input parameter(s)
         let input_params = if neuron.inputs.len() == 1 && neuron.inputs[0].name == "default" {
             "x".to_string()
         } else {
-            neuron.inputs.iter()
+            neuron
+                .inputs
+                .iter()
                 .map(|p| p.name.clone())
                 .collect::<Vec<_>>()
                 .join(", ")
@@ -118,14 +143,17 @@ impl<'a> CodeGenerator<'a> {
                     self,
                     output,
                     connections,
-                    &neuron.inputs.iter().map(|p| p.name.as_str()).collect::<Vec<_>>()
+                    &neuron
+                        .inputs
+                        .iter()
+                        .map(|p| p.name.as_str())
+                        .collect::<Vec<_>>(),
                 )?;
             }
         }
 
         Ok(())
     }
-
 }
 
 /// Collect all composite neuron dependencies recursively
@@ -142,11 +170,19 @@ fn collect_dependencies(
     visited.insert(neuron_name.to_string());
 
     // Get the neuron definition
-    let neuron = program.neurons.get(neuron_name)
+    let neuron = program
+        .neurons
+        .get(neuron_name)
         .ok_or_else(|| CodegenError::NeuronNotFound(neuron_name.to_string()))?;
 
     // Only process composite neurons (primitives are just imports)
-    if let NeuronBody::Graph { let_bindings, set_bindings, connections } = &neuron.body {
+    if let NeuronBody::Graph {
+        let_bindings,
+        set_bindings,
+        context_bindings: _,
+        connections,
+    } = &neuron.body
+    {
         // Collect all called neuron names from bindings and connections
         let mut called_neurons = HashSet::new();
 
@@ -215,7 +251,9 @@ fn collect_calls_from_endpoint(endpoint: &Endpoint, result: &mut HashSet<String>
 /// Generate PyTorch code for a specific neuron (PUBLIC API)
 pub fn generate_pytorch(program: &Program, neuron_name: &str) -> Result<String, CodegenError> {
     // Verify the requested neuron exists
-    let _neuron = program.neurons.get(neuron_name)
+    let _neuron = program
+        .neurons
+        .get(neuron_name)
         .ok_or_else(|| CodegenError::NeuronNotFound(neuron_name.to_string()))?;
 
     // Collect all composite dependencies in topological order
@@ -282,7 +320,8 @@ fn run_shape_inference_for_neuron(neuron: &NeuronDef, program: &Program) -> Infe
     // Register individual named input ports
     for port in &neuron.inputs {
         if port.name != "default" {
-            ctx.node_outputs.insert(port.name.clone(), vec![port.shape.clone()]);
+            ctx.node_outputs
+                .insert(port.name.clone(), vec![port.shape.clone()]);
         }
     }
 

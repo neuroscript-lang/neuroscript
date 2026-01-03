@@ -5,11 +5,11 @@
 
 use pest::iterators::Pair;
 
-use crate::grammar::Rule;
 use crate::grammar::error;
+use crate::grammar::Rule;
 use crate::interfaces::{
-    BinOp, Binding, Connection, Dim, DimExpr, Endpoint, ImplRef, MatchArm, MatchExpr,
-    NeuronBody, NeuronDef, Param, ParseError, Port, PortRef, Program, Shape, UseStmt, Value,
+    BinOp, Binding, Connection, Dim, DimExpr, Endpoint, ImplRef, MatchArm, MatchExpr, NeuronBody,
+    NeuronDef, Param, ParseError, Port, PortRef, Program, Shape, UseStmt, Value,
 };
 
 /// AST builder state
@@ -150,6 +150,7 @@ impl AstBuilder {
             NeuronBody::Graph {
                 let_bindings,
                 set_bindings,
+                context_bindings: vec![],
                 connections,
             }
         };
@@ -447,6 +448,7 @@ impl AstBuilder {
             call_name,
             args,
             kwargs,
+            scope: crate::interfaces::Scope::Instance { lazy: false },
         })
     }
 
@@ -1133,8 +1135,12 @@ neuron Test:
                     match (&pest_neuron.body, &old_neuron.body) {
                         (NeuronBody::Primitive(_), NeuronBody::Primitive(_)) => {}
                         (
-                            NeuronBody::Graph { connections: pc, .. },
-                            NeuronBody::Graph { connections: oc, .. },
+                            NeuronBody::Graph {
+                                connections: pc, ..
+                            },
+                            NeuronBody::Graph {
+                                connections: oc, ..
+                            },
                         ) => {
                             assert_eq!(
                                 pc.len(),

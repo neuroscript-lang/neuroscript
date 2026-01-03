@@ -21,6 +21,7 @@ NeuroScript currently lacks three capabilities essential for expressing modern n
 3. **Higher-order composition:** No way to pass neuron instances as parameters, preventing patterns like Universal Transformers or generic layer repeaters.
 
 These limitations prevent clean expression of:
+
 - Universal Transformers (weight-shared layers)
 - Tiny Recursive Models (TRM) with iterative refinement
 - Shared vocabularies across encoder/decoder architectures
@@ -28,6 +29,7 @@ These limitations prevent clean expression of:
 - Any architecture where depth is parameterized
 
 **Prior Art:** The `let`/`set` specification explored these concepts but had issues:
+
 - Too many separate blocks (`let:`, `set:`, `get:`) made order-of-operations confusing
 - Scope boundaries were implicit and hard to validate
 - No clear distinction between dependency injection and instance creation
@@ -148,6 +150,7 @@ neuron TransformerBlock(d_model, num_heads):
 ```
 
 **Key properties:**
+
 - Appears at most once per neuron
 - Must come before `graph:` block
 - All names used in `graph:` must be bound in `context:`
@@ -166,11 +169,13 @@ neuron TransformerBlock(d_model, num_heads):
 **Sharing:** Shared across ALL neurons in the module
 
 **Use cases:**
+
 - Shared vocabularies (encoder/decoder sharing embedding table)
 - Global configuration constants
 - Shared positional encodings
 
 **Example:**
+
 ```neuroscript
 @global vocab = Embedding(50257, 768)
 @global pos_encoding = PositionalEncoding(768, max_len=2048)
@@ -186,6 +191,7 @@ neuron Encoder(d_model):
 ```
 
 **Codegen:**
+
 ```python
 # Module level
 vocab = Embedding(50257, 768)
@@ -207,11 +213,13 @@ class Encoder(nn.Module):
 **Sharing:** Shared across all instances of THIS neuron type
 
 **Use cases:**
+
 - Universal Transformers (all instances share same weights)
 - Weight-tied layers
 - Shared normalization layers
 
 **Example:**
+
 ```neuroscript
 neuron TransformerBlock(d_model):
   in: [*, seq, d_model]
@@ -235,6 +243,7 @@ neuron TwoBlocks(d_model):
 ```
 
 **Codegen:**
+
 ```python
 class TransformerBlock(nn.Module):
     # Class variable (shared across all instances)
@@ -260,10 +269,12 @@ class TransformerBlock(nn.Module):
 **Sharing:** Per-instance, not shared
 
 **Use cases:**
+
 - Standard neural network weights (most common case)
 - Per-instance state
 
 **Example:**
+
 ```neuroscript
 neuron MyNeuron(dim):
   context:
@@ -274,6 +285,7 @@ neuron MyNeuron(dim):
 ```
 
 **Codegen:**
+
 ```python
 class MyNeuron(nn.Module):
     def __init__(self, dim):
@@ -304,11 +316,13 @@ neuron ConditionalNetwork(dim, use_attention):
 ```
 
 **Compile-time analysis:**
+
 - If `use_attention` is known at compile time, compiler selects one branch
 - Only bindings referenced in the selected branch are instantiated
 - If both branches possible, both bindings instantiated
 
 **Codegen (when use_attention known at compile time):**
+
 ```python
 class ConditionalNetwork(nn.Module):
     def __init__(self, dim, use_attention):
@@ -350,6 +364,7 @@ neuron ApplyNTimes(block: Neuron, depth: int):
 ```
 
 **Usage:**
+
 ```neuroscript
 neuron UniversalTransformer(d_model, num_heads, depth):
   in: [*, seq, d_model]
@@ -377,6 +392,7 @@ neuron Apply(transform: Neuron):
 ```
 
 **Type checking rules:**
+
 1. Neuron parameter shapes must be compatible with usage context
 2. Input shape of neuron param ≥ shape at call site
 3. Output shape of neuron param ≤ expected shape at call site
@@ -423,6 +439,7 @@ When instantiating `RecursiveStack(768, 12, 3072, 3)`:
 **Max depth:** 100 (compiler error if exceeded)
 
 **Codegen (flattened structure):**
+
 ```python
 class RecursiveStack(nn.Module):
     def __init__(self, d_model, num_heads, d_ff, depth):
@@ -448,6 +465,7 @@ class RecursiveStack(nn.Module):
 The graph block can **only** reference names bound in the `context:` block. Direct scope access (e.g., `@global.vocab`) is forbidden.
 
 **Invalid:**
+
 ```neuroscript
 @global vocab = Embedding(50257, 768)
 
@@ -457,6 +475,7 @@ neuron Encoder(d_model):
 ```
 
 **Valid:**
+
 ```neuroscript
 @global vocab = Embedding(50257, 768)
 
@@ -470,6 +489,7 @@ neuron Encoder(d_model):
 ### Rationale
 
 Strict boundaries provide:
+
 1. **Clear dependencies:** All external dependencies visible in `context:` block
 2. **Validation:** Compiler can check all references exist
 3. **Namespace control:** No accidental name collisions
@@ -598,6 +618,7 @@ neuron Encoder(seq_len):
 ```
 
 **Correct approach:**
+
 ```neuroscript
 @global embedding_dim = 768
 
@@ -643,6 +664,7 @@ neuron UniversalTransformer(d_model, num_heads, depth):
 ```
 
 **Key points:**
+
 - `ApplyNTimes` is higher-order (takes `block: Neuron`)
 - `shared_block` is `@static` → shared across all UniversalTransformer instances
 - Recursion unrolls at compile time (depth must be known)
@@ -682,6 +704,7 @@ neuron Decoder(d_model):
 ```
 
 **Key points:**
+
 - `@global` ensures encoder and decoder share exact same embedding weights
 - Explicit binding in `context:` makes dependency clear
 - Validation ensures vocab_table is only created once
@@ -728,6 +751,7 @@ neuron GPT2(vocab_size, d_model, num_heads, d_ff, num_layers, max_seq):
 ```
 
 **Key points:**
+
 - `GPTStack` recursively unrolls based on `num_layers`
 - Each layer gets its own weights (not weight-shared)
 - Max 100 layers (compiler enforces limit)
@@ -759,6 +783,7 @@ neuron AdaptiveModel(dim, use_attention, use_residual):
 ```
 
 **Key points:**
+
 - `@lazy` prevents instantiating unused modules
 - Compiler analyzes which path is taken based on compile-time parameters
 - Only necessary modules are created
@@ -797,6 +822,7 @@ neuron RecursionCycle(d_model, num_steps):
 ```
 
 **Key points:**
+
 - `@static step` is shared across all RecursionCycle instances
 - Combines higher-order neurons with static scope
 - Enables TRM's iterative reasoning pattern
@@ -822,12 +848,14 @@ neuron RecursionCycle(d_model, num_steps):
 ### Scope Implementation in Codegen
 
 **Global scope:**
+
 ```python
 # Module level, before any class definitions
 global_var = SomeNeuron(args)
 ```
 
 **Static scope:**
+
 ```python
 class MyNeuron(nn.Module):
     # Class variable, initialized on first instance
@@ -840,6 +868,7 @@ class MyNeuron(nn.Module):
 ```
 
 **Instance scope:**
+
 ```python
 class MyNeuron(nn.Module):
     def __init__(self, ...):
@@ -849,6 +878,7 @@ class MyNeuron(nn.Module):
 ```
 
 **Lazy instantiation:**
+
 ```python
 class MyNeuron(nn.Module):
     def __init__(self, condition):
@@ -867,6 +897,7 @@ class MyNeuron(nn.Module):
 ### Higher-Order Neuron Implementation
 
 **Neuron parameters in Python:**
+
 ```python
 class ApplyNTimes(nn.Module):
     def __init__(self, block: nn.Module, depth: int):
@@ -886,16 +917,18 @@ class ApplyNTimes(nn.Module):
 ### Recursion Unrolling Strategy
 
 **Compile-time evaluation:**
+
 1. Start with initial parameters (e.g., `depth=3`)
 2. Evaluate guard expression with parameters
 3. If guard true, instantiate binding and recurse with decremented parameter
 4. Track unroll depth, error if exceeds 100
 5. Continue until base case reached
-6. Generate nested Python __init__ structure
+6. Generate nested Python **init** structure
 
 ### Error Messages
 
 **Scope violation:**
+
 ```
 Error: Cannot reference @global.vocab directly in graph block
   --> example.ns:15:8
@@ -908,6 +941,7 @@ Error: Cannot reference @global.vocab directly in graph block
 ```
 
 **Recursion depth exceeded:**
+
 ```
 Error: Recursion depth exceeded limit of 100
   --> example.ns:23:12
@@ -920,6 +954,7 @@ Error: Recursion depth exceeded limit of 100
 ```
 
 **Invalid scope annotation:**
+
 ```
 Error: @static annotation not allowed at module level
   --> example.ns:3:1
@@ -948,6 +983,7 @@ Error: @static annotation not allowed at module level
 ### Example Migration
 
 **Old (let/set/get):**
+
 ```neuroscript
 neuron OldStyle(dim):
   set:
@@ -961,6 +997,7 @@ neuron OldStyle(dim):
 ```
 
 **New (context):**
+
 ```neuroscript
 neuron NewStyle(dim):
   context:
@@ -986,6 +1023,7 @@ neuron DynamicStack(d_model, depth: runtime):
 ```
 
 This requires either:
+
 - Python-level recursion (with depth limit checking)
 - Loop-based implementation
 - JIT compilation based on runtime depth

@@ -37,7 +37,11 @@ impl ParseError {
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, pos: 0, next_node_id: 0 }
+        Parser {
+            tokens,
+            pos: 0,
+            next_node_id: 0,
+        }
     }
 
     fn next_id(&mut self) -> usize {
@@ -56,7 +60,9 @@ impl Parser {
     // === Core parsing infrastructure ===
 
     fn peek(&self) -> &Token {
-        self.tokens.get(self.pos).unwrap_or(&self.tokens[self.tokens.len() - 1])
+        self.tokens
+            .get(self.pos)
+            .unwrap_or(&self.tokens[self.tokens.len() - 1])
     }
 
     fn peek_kind(&self) -> &TokenKind {
@@ -181,8 +187,26 @@ impl Parser {
 
     // === Grammar rules ===
 
+    // @global name = Value
+    fn parse_global_binding(&mut self) -> Result<GlobalBinding, ParseError> {
+        self.expect(&TokenKind::AtGlobal)?;
+        let name = self.ident()?;
+        self.expect(&TokenKind::Assign)?;
+        let value = self.expr()?;
+        self.skip_newlines(); // Optional newline
+
+        Ok(GlobalBinding { name, value })
+    }
+
     fn program(&mut self) -> Result<Program, ParseError> {
         let mut program = Program::new();
+        // Program::new() implementation is likely in interfaces.rs but usually it's just a struct init or Default impl.
+        // Wait, Program struct definition doesn't show a new() method in the viewed code of interfaces.rs
+        // But parser calls Program::new().
+        // Let's check where Program::new is defined. It's likely derived or manually implemented in interfaces.rs but wasn't shown or I missed it.
+        // Actually, I can just fix the struct initialization in the parser if it was creating it manually,
+        // but the parser calls `Program::new()`.
+        // Let's check `src/interfaces.rs` again to see if there is an impl block for Program.
 
         self.skip_newlines();
 
@@ -191,6 +215,10 @@ impl Parser {
                 TokenKind::Use => {
                     let use_stmt = self.use_stmt()?;
                     program.uses.push(use_stmt);
+                }
+                TokenKind::AtGlobal => {
+                    let binding = self.parse_global_binding()?;
+                    program.globals.push(binding);
                 }
                 TokenKind::Neuron => {
                     let neuron = self.neuron_def()?;
@@ -267,6 +295,7 @@ impl Parser {
         let mut outputs = vec![];
         let mut let_bindings = vec![];
         let mut set_bindings = vec![];
+        let mut context_bindings = vec![];
         let mut graph_connections = None;
         let mut impl_ref = None;
 
@@ -311,8 +340,13 @@ impl Parser {
                     set_bindings.extend(bindings);
                 }
                 TokenKind::Impl => {
-                    let impl_ref_item = self.parse_single_section(&TokenKind::Impl, |p| p.impl_item())?;
+                    let impl_ref_item =
+                        self.parse_single_section(&TokenKind::Impl, |p| p.impl_item())?;
                     impl_ref = Some(impl_ref_item);
+                }
+                TokenKind::Context => {
+                    let bindings = self.parse_context_block()?;
+                    context_bindings.extend(bindings);
                 }
                 TokenKind::Graph => {
                     graph_connections = Some(self.graph_body()?);
@@ -338,14 +372,17 @@ impl Parser {
             NeuronBody::Graph {
                 let_bindings,
                 set_bindings,
+                context_bindings,
                 connections,
             }
         } else {
             // If no impl or graph but we have bindings, treat as graph with empty connections
-            if !let_bindings.is_empty() || !set_bindings.is_empty() {
+            if !let_bindings.is_empty() || !set_bindings.is_empty() || !context_bindings.is_empty()
+            {
                 NeuronBody::Graph {
                     let_bindings,
                     set_bindings,
+                    context_bindings,
                     connections: vec![],
                 }
             } else {
@@ -424,7 +461,10 @@ impl Parser {
     }
 
     fn peek_at_colon(&self) -> bool {
-        self.tokens.get(self.pos + 1).map(|t| t.kind == TokenKind::Colon).unwrap_or(false)
+        self.tokens
+            .get(self.pos + 1)
+            .map(|t| t.kind == TokenKind::Colon)
+            .unwrap_or(false)
     }
 
     // [dim, dim, dim]
@@ -471,14 +511,18 @@ impl Parser {
                 Ok(Dim::Wildcard)
             }
         } else if self.at(&TokenKind::Int(0)) {
-            let TokenKind::Int(n) = self.advance().kind.clone() else { unreachable!() };
+            let TokenKind::Int(n) = self.advance().kind.clone() else {
+                unreachable!()
+            };
             Ok(Dim::Literal(n))
         } else if self.at(&TokenKind::Ident("".into())) {
             let name = self.ident()?;
 
             // Check for binary op
-            if self.at(&TokenKind::Star) || self.at(&TokenKind::Plus)
-                || self.at(&TokenKind::Minus) || self.at(&TokenKind::Slash)
+            if self.at(&TokenKind::Star)
+                || self.at(&TokenKind::Plus)
+                || self.at(&TokenKind::Minus)
+                || self.at(&TokenKind::Slash)
             {
                 let op = self.binop()?;
                 let right = self.dim()?;
@@ -565,7 +609,55 @@ impl Parser {
             call_name,
             args,
             kwargs,
+            scope: Scope::Instance { lazy: false },
         })
+    }
+
+    // [annotations] name = NeuronCall(args)
+    fn parse_context_binding(&mut self) -> Result<Binding, ParseError> {
+        let mut scope = Scope::Instance { lazy: false };
+
+        // Parse annotations
+        if self.at(&TokenKind::AtStatic) {
+            self.advance();
+            scope = Scope::Static;
+        } else if self.at(&TokenKind::AtGlobal) {
+            self.advance();
+            scope = Scope::Global;
+        } else if self.at(&TokenKind::AtLazy) {
+            self.advance();
+            scope = Scope::Instance { lazy: true };
+        }
+
+        let name = self.ident()?;
+        self.expect(&TokenKind::Assign)?;
+
+        // Parse the neuron call
+        let call_name = self.ident()?;
+        self.expect(&TokenKind::LParen)?;
+        let (args, kwargs) = self.call_args()?;
+        self.expect(&TokenKind::RParen)?;
+
+        // Handle possible newline (implicit in parse_section usually, but good to be safe if inline)
+        // parse_section handles newlines between items.
+        // But parse_binding has explicit newline expect.
+        // Let's match parse_binding behavior if needed, or rely on section parser.
+        // parse_binding expects newline. So should we.
+        if self.at(&TokenKind::Newline) {
+            self.advance();
+        }
+
+        Ok(Binding {
+            name,
+            call_name,
+            args,
+            kwargs,
+            scope,
+        })
+    }
+
+    fn parse_context_block(&mut self) -> Result<Vec<Binding>, ParseError> {
+        self.parse_section(&TokenKind::Context, |p| p.parse_context_binding())
     }
 
     // endpoint -> endpoint [-> endpoint...]
@@ -689,7 +781,12 @@ impl Parser {
                     self.call_args()?
                 };
                 self.expect(&TokenKind::RParen)?;
-                Ok(Endpoint::Call { name, args, kwargs, id: self.next_id() })
+                Ok(Endpoint::Call {
+                    name,
+                    args,
+                    kwargs,
+                    id: self.next_id(),
+                })
             } else {
                 Ok(Endpoint::Ref(PortRef::new(name)))
             }
@@ -700,7 +797,7 @@ impl Parser {
     fn match_expr(&mut self) -> Result<MatchExpr, ParseError> {
         self.expect(&TokenKind::Match)?;
         self.expect(&TokenKind::Colon)?;
-        
+
         self.expect(&TokenKind::Newline)?;
         self.expect(&TokenKind::Indent)?;
 
@@ -756,6 +853,10 @@ impl Parser {
         let mut args = vec![];
         let mut kwargs = vec![];
 
+        if self.at(&TokenKind::RParen) {
+            return Ok((args, kwargs));
+        }
+
         loop {
             // Check for keyword arg
             if self.at(&TokenKind::Ident("".into())) && self.peek_at_assign() {
@@ -778,7 +879,10 @@ impl Parser {
     }
 
     fn peek_at_assign(&self) -> bool {
-        self.tokens.get(self.pos + 1).map(|t| t.kind == TokenKind::Assign).unwrap_or(false)
+        self.tokens
+            .get(self.pos + 1)
+            .map(|t| t.kind == TokenKind::Assign)
+            .unwrap_or(false)
     }
 
     // Expression parsing
@@ -788,10 +892,14 @@ impl Parser {
 
     fn comparison(&mut self) -> Result<Value, ParseError> {
         let mut left = self.additive()?;
-        
+
         while self.at_any(&[
-            TokenKind::Lt, TokenKind::Gt, TokenKind::Le, 
-            TokenKind::Ge, TokenKind::Eq, TokenKind::Ne
+            TokenKind::Lt,
+            TokenKind::Gt,
+            TokenKind::Le,
+            TokenKind::Ge,
+            TokenKind::Eq,
+            TokenKind::Ne,
         ]) {
             let op = self.comparison_op()?;
             let right = self.additive()?;
@@ -801,7 +909,7 @@ impl Parser {
                 right: Box::new(right),
             };
         }
-        
+
         Ok(left)
     }
 
@@ -813,10 +921,12 @@ impl Parser {
             TokenKind::Ge => BinOp::Ge,
             TokenKind::Eq => BinOp::Eq,
             TokenKind::Ne => BinOp::Ne,
-            _ => return Err(ParseError::Unexpected {
-                found: format!("{:?}", self.peek_kind()),
-                span: self.peek().span.into(),
-            }),
+            _ => {
+                return Err(ParseError::Unexpected {
+                    found: format!("{:?}", self.peek_kind()),
+                    span: self.peek().span.into(),
+                })
+            }
         };
         self.advance();
         Ok(op)

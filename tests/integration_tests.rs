@@ -8,8 +8,8 @@
 //!
 //! Snapshots are stored in tests/snapshots/ and managed by the `insta` crate.
 
-use neuroscript::{parse, validate, generate_pytorch};
 use neuroscript::interfaces::*;
+use neuroscript::{generate_pytorch, parse, validate};
 use std::fs;
 use std::path::PathBuf;
 
@@ -26,8 +26,11 @@ fn format_program_ir(program: &Program) -> String {
     if !program.uses.is_empty() {
         output.push_str("=== Uses ===\n");
         for use_stmt in &program.uses {
-            output.push_str(&format!("use {} (source: {})\n",
-                use_stmt.path.join("::"), use_stmt.source));
+            output.push_str(&format!(
+                "use {} (source: {})\n",
+                use_stmt.path.join("::"),
+                use_stmt.source
+            ));
         }
         output.push('\n');
     }
@@ -52,13 +55,17 @@ fn format_neuron(neuron: &NeuronDef) -> String {
     output.push_str(&format!("neuron {}", neuron.name));
     if !neuron.params.is_empty() {
         output.push('(');
-        let param_strs: Vec<String> = neuron.params.iter().map(|p| {
-            if let Some(default) = &p.default {
-                format!("{} = {}", p.name, format_value(default))
-            } else {
-                p.name.clone()
-            }
-        }).collect();
+        let param_strs: Vec<String> = neuron
+            .params
+            .iter()
+            .map(|p| {
+                if let Some(default) = &p.default {
+                    format!("{} = {}", p.name, format_value(default))
+                } else {
+                    p.name.clone()
+                }
+            })
+            .collect();
         output.push_str(&param_strs.join(", "));
         output.push(')');
     }
@@ -68,7 +75,11 @@ fn format_neuron(neuron: &NeuronDef) -> String {
     if !neuron.inputs.is_empty() {
         output.push_str("  inputs:\n");
         for port in &neuron.inputs {
-            output.push_str(&format!("    {}: {}\n", port.name, format_shape(&port.shape)));
+            output.push_str(&format!(
+                "    {}: {}\n",
+                port.name,
+                format_shape(&port.shape)
+            ));
         }
     }
 
@@ -76,7 +87,11 @@ fn format_neuron(neuron: &NeuronDef) -> String {
     if !neuron.outputs.is_empty() {
         output.push_str("  outputs:\n");
         for port in &neuron.outputs {
-            output.push_str(&format!("    {}: {}\n", port.name, format_shape(&port.shape)));
+            output.push_str(&format!(
+                "    {}: {}\n",
+                port.name,
+                format_shape(&port.shape)
+            ));
         }
     }
 
@@ -86,17 +101,37 @@ fn format_neuron(neuron: &NeuronDef) -> String {
             output.push_str("  impl:\n");
             output.push_str(&format!("    {}\n", format_impl_ref(impl_ref)));
         }
-        NeuronBody::Graph { let_bindings, set_bindings, connections } => {
+        NeuronBody::Graph {
+            let_bindings,
+            set_bindings,
+            context_bindings,
+            connections,
+        } => {
+            if !context_bindings.is_empty() {
+                output.push_str("  context:\n");
+                for binding in context_bindings {
+                    output.push_str(&format!(
+                        "    {} = {}(...)\n",
+                        binding.name, binding.call_name
+                    ));
+                }
+            }
             if !let_bindings.is_empty() {
                 output.push_str("  let:\n");
                 for binding in let_bindings {
-                    output.push_str(&format!("    {} = {}(...)\n", binding.name, binding.call_name));
+                    output.push_str(&format!(
+                        "    {} = {}(...)\n",
+                        binding.name, binding.call_name
+                    ));
                 }
             }
             if !set_bindings.is_empty() {
                 output.push_str("  set:\n");
                 for binding in set_bindings {
-                    output.push_str(&format!("    {} = {}(...)\n", binding.name, binding.call_name));
+                    output.push_str(&format!(
+                        "    {} = {}(...)\n",
+                        binding.name, binding.call_name
+                    ));
                 }
             }
             output.push_str("  graph:\n");
@@ -110,22 +145,28 @@ fn format_neuron(neuron: &NeuronDef) -> String {
 }
 
 fn format_shape(shape: &Shape) -> String {
-    let dims: Vec<String> = shape.dims.iter().map(|dim| match dim {
-        Dim::Literal(n) => n.to_string(),
-        Dim::Named(name) => name.clone(),
-        Dim::Wildcard => "*".to_string(),
-        Dim::Variadic(name) => format!("*{}", name),
-        Dim::Expr(expr) => format_dim_expr(expr),
-    }).collect();
+    let dims: Vec<String> = shape
+        .dims
+        .iter()
+        .map(|dim| match dim {
+            Dim::Literal(n) => n.to_string(),
+            Dim::Named(name) => name.clone(),
+            Dim::Wildcard => "*".to_string(),
+            Dim::Variadic(name) => format!("*{}", name),
+            Dim::Expr(expr) => format_dim_expr(expr),
+        })
+        .collect();
 
     format!("[{}]", dims.join(", "))
 }
 
 fn format_dim_expr(expr: &DimExpr) -> String {
-    format!("({} {} {})",
+    format!(
+        "({} {} {})",
         format_dim(&expr.left),
         format_binop(&expr.op),
-        format_dim(&expr.right))
+        format_dim(&expr.right)
+    )
 }
 
 fn format_dim(dim: &Dim) -> String {
@@ -146,14 +187,23 @@ fn format_value(value: &Value) -> String {
         Value::Bool(b) => b.to_string(),
         Value::Name(name) => name.clone(),
         Value::BinOp { op, left, right } => {
-            format!("({} {} {})", format_value(left), format_binop(op), format_value(right))
+            format!(
+                "({} {} {})",
+                format_value(left),
+                format_binop(op),
+                format_value(right)
+            )
         }
         Value::Call { name, args, kwargs } => {
             let mut result = name.clone();
             result.push('(');
             let mut params = Vec::new();
             params.extend(args.iter().map(format_value));
-            params.extend(kwargs.iter().map(|(k, v)| format!("{}={}", k, format_value(v))));
+            params.extend(
+                kwargs
+                    .iter()
+                    .map(|(k, v)| format!("{}={}", k, format_value(v))),
+            );
             result.push_str(&params.join(", "));
             result.push(')');
             result
@@ -182,7 +232,8 @@ fn format_impl_ref(impl_ref: &ImplRef) -> String {
             if kwargs.is_empty() {
                 "External".to_string()
             } else {
-                let kwargs_str: Vec<String> = kwargs.iter()
+                let kwargs_str: Vec<String> = kwargs
+                    .iter()
                     .map(|(k, v)| format!("{}={}", k, format_value(v)))
                     .collect();
                 format!("External with kwargs: {}", kwargs_str.join(", "))
@@ -195,7 +246,11 @@ fn format_impl_ref(impl_ref: &ImplRef) -> String {
 }
 
 fn format_connection(conn: &Connection) -> String {
-    format!("{} -> {}", format_endpoint(&conn.source), format_endpoint(&conn.destination))
+    format!(
+        "{} -> {}",
+        format_endpoint(&conn.source),
+        format_endpoint(&conn.destination)
+    )
 }
 
 fn format_endpoint(endpoint: &Endpoint) -> String {
@@ -205,13 +260,22 @@ fn format_endpoint(endpoint: &Endpoint) -> String {
             let items: Vec<String> = port_refs.iter().map(format_port_ref).collect();
             format!("({})", items.join(", "))
         }
-        Endpoint::Call { name, args, kwargs, id } => {
+        Endpoint::Call {
+            name,
+            args,
+            kwargs,
+            id,
+        } => {
             let mut result = format!("{}#{}", name, id);
             if !args.is_empty() || !kwargs.is_empty() {
                 result.push('(');
                 let mut params = Vec::new();
                 params.extend(args.iter().map(format_value));
-                params.extend(kwargs.iter().map(|(k, v)| format!("{}={}", k, format_value(v))));
+                params.extend(
+                    kwargs
+                        .iter()
+                        .map(|(k, v)| format!("{}={}", k, format_value(v))),
+                );
                 result.push_str(&params.join(", "));
                 result.push(')');
             } else {
@@ -228,9 +292,7 @@ fn format_endpoint(endpoint: &Endpoint) -> String {
                 }
                 result.push_str(": ");
                 // Format pipeline
-                let pipeline_str: Vec<String> = arm.pipeline.iter()
-                    .map(format_endpoint)
-                    .collect();
+                let pipeline_str: Vec<String> = arm.pipeline.iter().map(format_endpoint).collect();
                 result.push_str(&pipeline_str.join(" -> "));
                 if !arm.is_reachable {
                     result.push_str(" [UNREACHABLE]");
@@ -286,8 +348,7 @@ fn get_test_files() -> Vec<PathBuf> {
 
 #[test]
 fn snapshot_parser_ir_residual() {
-    let source = fs::read_to_string("examples/residual.ns")
-        .expect("Failed to read residual.ns");
+    let source = fs::read_to_string("examples/residual.ns").expect("Failed to read residual.ns");
 
     let program = parse(&source).expect("Parse failed");
     let formatted = format_program_ir(&program);
@@ -309,8 +370,7 @@ fn snapshot_parser_ir_residual() {
 
 #[test]
 fn snapshot_parser_ir_match_basic() {
-    let source = fs::read_to_string("examples/10-match.ns")
-        .expect("Failed to read 10-match.ns");
+    let source = fs::read_to_string("examples/10-match.ns").expect("Failed to read 10-match.ns");
 
     let program = parse(&source).expect("Parse failed");
     let formatted = format_program_ir(&program);
@@ -331,8 +391,7 @@ fn snapshot_parser_ir_match_dimension_binding() {
 
 #[test]
 fn snapshot_parser_ir_ffn_stdlib() {
-    let source = fs::read_to_string("stdlib/FFN.ns")
-        .expect("Failed to read FFN.ns");
+    let source = fs::read_to_string("stdlib/FFN.ns").expect("Failed to read FFN.ns");
 
     let program = parse(&source).expect("Parse failed");
     let formatted = format_program_ir(&program);
@@ -349,17 +408,37 @@ fn test_stdlib_loading_with_primitives() {
 
     // Verify we loaded a reasonable number of neurons
     // Should have at least the 26 primitives + stdlib neurons
-    assert!(stdlib.neurons.len() >= 26,
+    assert!(
+        stdlib.neurons.len() >= 26,
         "Expected at least 26 neurons (primitives), got {}",
-        stdlib.neurons.len());
+        stdlib.neurons.len()
+    );
 
     // Verify key primitives are present and have proper shapes
-    assert!(stdlib.neurons.contains_key("Linear"), "Linear primitive not found");
-    assert!(stdlib.neurons.contains_key("GELU"), "GELU primitive not found");
-    assert!(stdlib.neurons.contains_key("LayerNorm"), "LayerNorm primitive not found");
-    assert!(stdlib.neurons.contains_key("Dropout"), "Dropout primitive not found");
-    assert!(stdlib.neurons.contains_key("Fork"), "Fork primitive not found");
-    assert!(stdlib.neurons.contains_key("Add"), "Add primitive not found");
+    assert!(
+        stdlib.neurons.contains_key("Linear"),
+        "Linear primitive not found"
+    );
+    assert!(
+        stdlib.neurons.contains_key("GELU"),
+        "GELU primitive not found"
+    );
+    assert!(
+        stdlib.neurons.contains_key("LayerNorm"),
+        "LayerNorm primitive not found"
+    );
+    assert!(
+        stdlib.neurons.contains_key("Dropout"),
+        "Dropout primitive not found"
+    );
+    assert!(
+        stdlib.neurons.contains_key("Fork"),
+        "Fork primitive not found"
+    );
+    assert!(
+        stdlib.neurons.contains_key("Add"),
+        "Add primitive not found"
+    );
 
     // Verify Linear has proper shape signature
     let linear = &stdlib.neurons["Linear"];
@@ -373,7 +452,10 @@ fn test_stdlib_loading_with_primitives() {
     assert_eq!(fork.outputs.len(), 2);
 
     // Verify stdlib composite neurons are also present
-    assert!(stdlib.neurons.contains_key("FFN"), "FFN stdlib neuron not found");
+    assert!(
+        stdlib.neurons.contains_key("FFN"),
+        "FFN stdlib neuron not found"
+    );
 }
 
 // ============================================================================
@@ -400,8 +482,7 @@ neuron Linear(in_dim, out_dim):
     let mut program = parse(source).expect("Parse failed");
     validate(&mut program).expect("Validation failed");
 
-    let code = generate_pytorch(&program, "SimpleLinear")
-        .expect("Codegen failed");
+    let code = generate_pytorch(&program, "SimpleLinear").expect("Codegen failed");
 
     insta::assert_snapshot!("codegen_simple_linear", code);
 }
@@ -445,14 +526,12 @@ neuron Linear(in_dim, out_dim):
 
 #[test]
 fn snapshot_codegen_residual_block() {
-    let source = fs::read_to_string("examples/residual.ns")
-        .expect("Failed to read residual.ns");
+    let source = fs::read_to_string("examples/residual.ns").expect("Failed to read residual.ns");
 
     let mut program = parse(&source).expect("Parse failed");
     validate(&mut program).expect("Validation failed");
 
-    let code = generate_pytorch(&program, "Residual")
-        .expect("Codegen failed");
+    let code = generate_pytorch(&program, "Residual").expect("Codegen failed");
 
     insta::assert_snapshot!("codegen_residual_block", code);
 }
@@ -472,7 +551,8 @@ neuron Test:
     let mut program = parse(source).expect("Parse should succeed");
     let errors = validate(&mut program).unwrap_err();
 
-    let error_text = errors.iter()
+    let error_text = errors
+        .iter()
         .map(|e| format!("{:?}", e))
         .collect::<Vec<_>>()
         .join("\n\n");
@@ -497,7 +577,8 @@ neuron TwoOutputs:
     let mut program = parse(source).expect("Parse should succeed");
     let errors = validate(&mut program).unwrap_err();
 
-    let error_text = errors.iter()
+    let error_text = errors
+        .iter()
         .map(|e| format!("{:?}", e))
         .collect::<Vec<_>>()
         .join("\n\n");
@@ -539,8 +620,11 @@ fn snapshot_all_examples() {
         let file_name = file_path.file_name().unwrap().to_str().unwrap();
 
         // Skip if we already have a specific test for this file
-        if file_name == "residual.ns" || file_name == "10-match.ns" ||
-           file_name == "17-match-dimension-binding.ns" || file_name == "FFN.ns" {
+        if file_name == "residual.ns"
+            || file_name == "10-match.ns"
+            || file_name == "17-match-dimension-binding.ns"
+            || file_name == "FFN.ns"
+        {
             continue;
         }
 

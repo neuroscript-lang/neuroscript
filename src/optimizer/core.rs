@@ -86,9 +86,9 @@ fn pattern_specificity(arm: &MatchArm) -> (usize, bool) {
     for dim in &arm.pattern.dims {
         match dim {
             Dim::Literal(_) => score += 100,
-            Dim::Named(_) => score += 10,  // Named captures less specific than literals
-            Dim::Expr(_) => score += 50,   // Expressions moderately specific
-            Dim::Wildcard => score += 1,   // Wildcards least specific
+            Dim::Named(_) => score += 10, // Named captures less specific than literals
+            Dim::Expr(_) => score += 50,  // Expressions moderately specific
+            Dim::Wildcard => score += 1,  // Wildcards least specific
             Dim::Variadic(_) => score += 0, // Variadics are catch-all
         }
     }
@@ -129,9 +129,7 @@ fn reorder_endpoint(endpoint: &mut Endpoint) -> usize {
     match endpoint {
         Endpoint::Match(match_expr) => {
             // Check if reordering would change anything
-            let original_order: Vec<_> = match_expr.arms.iter()
-                .map(pattern_specificity)
-                .collect();
+            let original_order: Vec<_> = match_expr.arms.iter().map(pattern_specificity).collect();
 
             // Stable sort by specificity (descending - most specific first)
             match_expr.arms.sort_by(|a, b| {
@@ -144,14 +142,12 @@ fn reorder_endpoint(endpoint: &mut Endpoint) -> usize {
                         // If equal specificity, guards come first
                         spec_b.1.cmp(&spec_a.1)
                     }
-                    other => other
+                    other => other,
                 }
             });
 
             // Check if order actually changed
-            let new_order: Vec<_> = match_expr.arms.iter()
-                .map(pattern_specificity)
-                .collect();
+            let new_order: Vec<_> = match_expr.arms.iter().map(pattern_specificity).collect();
 
             if original_order != new_order {
                 count += 1;
@@ -183,13 +179,11 @@ pub fn try_static_resolve(
     ctx: &InferenceContext,
 ) -> Option<usize> {
     // Check if input shape is fully concrete (all dimensions resolved)
-    let all_concrete = input_shape.dims.iter().all(|dim| {
-        match dim {
-            Dim::Literal(_) => true,
-            Dim::Named(name) => ctx.resolved_dims.contains_key(name),
-            Dim::Expr(expr) => ctx.evaluate_expr(expr).is_some(),
-            _ => false,
-        }
+    let all_concrete = input_shape.dims.iter().all(|dim| match dim {
+        Dim::Literal(_) => true,
+        Dim::Named(name) => ctx.resolved_dims.contains_key(name),
+        Dim::Expr(expr) => ctx.evaluate_expr(expr).is_some(),
+        _ => false,
     });
 
     if !all_concrete {
@@ -231,7 +225,7 @@ fn pattern_matches_shape(pattern: &Shape, concrete: &Shape, ctx: &InferenceConte
 
     for (pat_dim, concrete_dim) in pattern.dims.iter().zip(&concrete.dims) {
         match pat_dim {
-            Dim::Wildcard => continue, // Always matches
+            Dim::Wildcard => continue,       // Always matches
             Dim::Variadic(_) => return true, // Matches rest of shape
             Dim::Literal(pat_val) => {
                 let concrete_val = match concrete_dim {
@@ -320,6 +314,7 @@ mod tests {
         // Construct a program with a match expression having an unreachable arm
         let mut program = Program {
             uses: vec![],
+            globals: vec![],
             neurons: HashMap::new(),
         };
 
@@ -365,9 +360,11 @@ mod tests {
             params: vec![],
             inputs: vec![],
             outputs: vec![],
+            max_cycle_depth: Some(10),
             body: NeuronBody::Graph {
                 let_bindings: vec![],
                 set_bindings: vec![],
+                context_bindings: vec![],
                 connections: vec![connection],
             },
         };
@@ -397,6 +394,7 @@ mod tests {
         // Test case: [*, d] shadows [*, 512]
         let mut program = Program {
             uses: vec![],
+            globals: vec![],
             neurons: HashMap::new(),
         };
 
@@ -431,9 +429,11 @@ mod tests {
             params: vec![],
             inputs: vec![],
             outputs: vec![],
+            max_cycle_depth: Some(10),
             body: NeuronBody::Graph {
                 let_bindings: vec![],
                 set_bindings: vec![],
+                context_bindings: vec![],
                 connections: vec![connection],
             },
         };
@@ -465,6 +465,7 @@ mod tests {
         // Guards make arms reachable even if patterns overlap
         let mut program = Program {
             uses: vec![],
+            globals: vec![],
             neurons: HashMap::new(),
         };
 
@@ -503,9 +504,11 @@ mod tests {
             params: vec![],
             inputs: vec![],
             outputs: vec![],
+            max_cycle_depth: Some(10),
             body: NeuronBody::Graph {
                 let_bindings: vec![],
                 set_bindings: vec![],
+                context_bindings: vec![],
                 connections: vec![connection],
             },
         };
@@ -535,6 +538,7 @@ mod tests {
         // Multiple unreachable arms pruned at once
         let mut program = Program {
             uses: vec![],
+            globals: vec![],
             neurons: HashMap::new(),
         };
 
@@ -585,9 +589,11 @@ mod tests {
             params: vec![],
             inputs: vec![],
             outputs: vec![],
+            max_cycle_depth: Some(10),
             body: NeuronBody::Graph {
                 let_bindings: vec![],
                 set_bindings: vec![],
+                context_bindings: vec![],
                 connections: vec![connection],
             },
         };
@@ -616,6 +622,7 @@ mod tests {
         // When optimization is disabled, nothing should be pruned
         let mut program = Program {
             uses: vec![],
+            globals: vec![],
             neurons: HashMap::new(),
         };
 
@@ -650,9 +657,11 @@ mod tests {
             params: vec![],
             inputs: vec![],
             outputs: vec![],
+            max_cycle_depth: Some(10),
             body: NeuronBody::Graph {
                 let_bindings: vec![],
                 set_bindings: vec![],
+                context_bindings: vec![],
                 connections: vec![connection],
             },
         };
@@ -680,6 +689,7 @@ mod tests {
         // Test nested match expressions (match inside match)
         let mut program = Program {
             uses: vec![],
+            globals: vec![],
             neurons: HashMap::new(),
         };
 
@@ -735,9 +745,11 @@ mod tests {
             params: vec![],
             inputs: vec![],
             outputs: vec![],
+            max_cycle_depth: Some(10),
             body: NeuronBody::Graph {
                 let_bindings: vec![],
                 set_bindings: vec![],
+                context_bindings: vec![],
                 connections: vec![connection],
             },
         };
@@ -745,10 +757,7 @@ mod tests {
         program.neurons.insert("NestedTest".to_string(), neuron);
 
         let pruned = optimize_matches(&mut program, true);
-        assert_eq!(
-            pruned, 2,
-            "Should prune 1 outer + 1 inner unreachable arm"
-        );
+        assert_eq!(pruned, 2, "Should prune 1 outer + 1 inner unreachable arm");
 
         // Verify pruning at both levels
         let neuron = program.neurons.get("NestedTest").unwrap();
@@ -774,6 +783,7 @@ mod tests {
     fn test_count_matches() {
         let mut program = Program {
             uses: vec![],
+            globals: vec![],
             neurons: HashMap::new(),
         };
 
@@ -805,19 +815,21 @@ mod tests {
             params: vec![],
             inputs: vec![],
             outputs: vec![],
+            max_cycle_depth: Some(10),
             body: NeuronBody::Graph {
                 let_bindings: vec![],
                 set_bindings: vec![],
+                context_bindings: vec![],
                 connections: vec![
-                Connection {
-                    source: Endpoint::Ref(PortRef::new("in")),
-                    destination: Endpoint::Match(match1),
-                },
-                Connection {
-                    source: Endpoint::Ref(PortRef::new("in")),
-                    destination: Endpoint::Match(match2),
-                },
-            ],
+                    Connection {
+                        source: Endpoint::Ref(PortRef::new("in")),
+                        destination: Endpoint::Match(match1),
+                    },
+                    Connection {
+                        source: Endpoint::Ref(PortRef::new("in")),
+                        destination: Endpoint::Match(match2),
+                    },
+                ],
             },
         };
 
@@ -876,6 +888,7 @@ mod tests {
         // Create a match with arms in wrong order (general before specific)
         let mut program = Program {
             uses: vec![],
+            globals: vec![],
             neurons: HashMap::new(),
         };
 
@@ -912,9 +925,11 @@ mod tests {
             params: vec![],
             inputs: vec![],
             outputs: vec![],
+            max_cycle_depth: Some(10),
             body: NeuronBody::Graph {
                 let_bindings: vec![],
                 set_bindings: vec![],
+                context_bindings: vec![],
                 connections: vec![connection],
             },
         };
@@ -929,8 +944,14 @@ mod tests {
         if let NeuronBody::Graph { connections, .. } = &neuron.body {
             if let Endpoint::Match(match_expr) = &connections[0].destination {
                 // First arm should now be the specific pattern
-                assert!(matches!(match_expr.arms[0].pattern.dims[0], Dim::Literal(2)));
-                assert!(matches!(match_expr.arms[0].pattern.dims[1], Dim::Literal(512)));
+                assert!(matches!(
+                    match_expr.arms[0].pattern.dims[0],
+                    Dim::Literal(2)
+                ));
+                assert!(matches!(
+                    match_expr.arms[0].pattern.dims[1],
+                    Dim::Literal(512)
+                ));
 
                 // Second arm should be the general pattern
                 assert!(matches!(match_expr.arms[1].pattern.dims[0], Dim::Wildcard));
@@ -981,7 +1002,10 @@ mod tests {
 
         // Input shape: [batch, dim] where both are resolved
         let input_shape = Shape {
-            dims: vec![Dim::Named("batch".to_string()), Dim::Named("dim".to_string())],
+            dims: vec![
+                Dim::Named("batch".to_string()),
+                Dim::Named("dim".to_string()),
+            ],
         };
 
         let resolved_arm = try_static_resolve(&match_expr, &input_shape, &ctx);
@@ -1026,7 +1050,11 @@ mod tests {
         };
 
         let resolved_arm = try_static_resolve(&match_expr, &input_shape, &ctx);
-        assert_eq!(resolved_arm, Some(0), "Should resolve to arm 0 (guard true: 1024 > 512)");
+        assert_eq!(
+            resolved_arm,
+            Some(0),
+            "Should resolve to arm 0 (guard true: 1024 > 512)"
+        );
     }
 
     #[test]
@@ -1035,16 +1063,14 @@ mod tests {
         let ctx = InferenceContext::default();
 
         let match_expr = MatchExpr {
-            arms: vec![
-                MatchArm {
-                    pattern: Shape {
-                        dims: vec![Dim::Wildcard, Dim::Literal(512)],
-                    },
-                    guard: None,
-                    pipeline: vec![],
-                    is_reachable: true,
+            arms: vec![MatchArm {
+                pattern: Shape {
+                    dims: vec![Dim::Wildcard, Dim::Literal(512)],
                 },
-            ],
+                guard: None,
+                pipeline: vec![],
+                is_reachable: true,
+            }],
         };
 
         // Input shape has unresolved dimension
@@ -1053,7 +1079,10 @@ mod tests {
         };
 
         let resolved_arm = try_static_resolve(&match_expr, &input_shape, &ctx);
-        assert_eq!(resolved_arm, None, "Should require runtime check (unknown dimension)");
+        assert_eq!(
+            resolved_arm, None,
+            "Should require runtime check (unknown dimension)"
+        );
     }
 
     #[test]

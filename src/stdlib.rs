@@ -79,6 +79,7 @@ fn find_stdlib_dir() -> Result<PathBuf, StdlibError> {
 fn load_stdlib_from_dir(dir: &Path) -> Result<Program, StdlibError> {
     let mut merged = Program {
         uses: Vec::new(),
+        globals: Vec::new(),
         neurons: HashMap::new(),
     };
 
@@ -102,9 +103,8 @@ fn load_stdlib_from_dir(dir: &Path) -> Result<Program, StdlibError> {
         let source = fs::read_to_string(&path)
             .map_err(|e| StdlibError::ReadError(path.display().to_string(), e))?;
 
-        let program = parse(&source).map_err(|e| {
-            StdlibError::ParseError(path.display().to_string(), format!("{}", e))
-        })?;
+        let program = parse(&source)
+            .map_err(|e| StdlibError::ParseError(path.display().to_string(), format!("{}", e)))?;
 
         // Check for duplicate neurons
         for name in program.neurons.keys() {
@@ -132,8 +132,8 @@ fn load_stdlib_from_dir(dir: &Path) -> Result<Program, StdlibError> {
 
 /// Recursively collect all .ns files from a directory and its subdirectories
 fn collect_ns_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), StdlibError> {
-    let entries = fs::read_dir(dir)
-        .map_err(|e| StdlibError::ReadError(dir.display().to_string(), e))?;
+    let entries =
+        fs::read_dir(dir).map_err(|e| StdlibError::ReadError(dir.display().to_string(), e))?;
 
     for entry in entries.filter_map(|e| e.ok()) {
         let path = entry.path();
@@ -201,11 +201,13 @@ mod tests {
     fn test_merge_programs() {
         let stdlib = Program {
             uses: vec![],
+            globals: vec![],
             neurons: HashMap::new(),
         };
 
         let user = Program {
             uses: vec![],
+            globals: vec![],
             neurons: HashMap::new(),
         };
 

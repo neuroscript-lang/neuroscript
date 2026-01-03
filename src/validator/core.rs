@@ -1,5 +1,5 @@
-use std::collections::{HashMap, HashSet};
 use crate::interfaces::*;
+use std::collections::{HashMap, HashSet};
 
 /// Symbol table tracking intermediate nodes in a composite neuron graph
 /// Maps node names to their resolved port signatures
@@ -25,7 +25,6 @@ impl SymbolTable {
     fn get_ports(&self, name: &str) -> Option<&Vec<Port>> {
         self.nodes.get(name)
     }
-
 }
 
 /// Graph validator
@@ -48,14 +47,27 @@ impl Validator {
         {
             for (_neuron_name, neuron) in &program.neurons {
                 // Validate connections within this neuron if it's composite
-                if let NeuronBody::Graph { let_bindings, set_bindings, connections } = &neuron.body {
+                if let NeuronBody::Graph {
+                    let_bindings,
+                    set_bindings,
+                    context_bindings: _,
+                    connections,
+                } = &neuron.body
+                {
                     // Validate bindings first
                     errors.extend(Self::validate_bindings(
-                        neuron, let_bindings, set_bindings, program, &registry
+                        neuron,
+                        let_bindings,
+                        set_bindings,
+                        program,
+                        &registry,
                     ));
 
                     errors.extend(Self::validate_neuron_graph(
-                        neuron, connections, program, &registry
+                        neuron,
+                        connections,
+                        program,
+                        &registry,
                     ));
                 }
             }
@@ -63,13 +75,13 @@ impl Validator {
 
         // Check match expressions (mutable pass for reachability)
         for (neuron_name, neuron) in &mut program.neurons {
-             if let NeuronBody::Graph { connections, .. } = &mut neuron.body {
-                 for connection in connections {
-                     if let Endpoint::Match(match_expr) = &mut connection.destination {
-                         errors.extend(Self::validate_match_expression(match_expr, neuron_name));
-                     }
-                 }
-             }
+            if let NeuronBody::Graph { connections, .. } = &mut neuron.body {
+                for connection in connections {
+                    if let Endpoint::Match(match_expr) = &mut connection.destination {
+                        errors.extend(Self::validate_match_expression(match_expr, neuron_name));
+                    }
+                }
+            }
         }
 
         if errors.is_empty() {
@@ -114,7 +126,8 @@ impl Validator {
                 errors.push(ValidationError::InvalidRecursion {
                     binding: binding.name.clone(),
                     neuron: neuron.name.clone(),
-                    reason: "set: bindings cannot be recursive (use let: for lazy recursion)".to_string(),
+                    reason: "set: bindings cannot be recursive (use let: for lazy recursion)"
+                        .to_string(),
                 });
             }
         }
@@ -146,7 +159,9 @@ impl Validator {
                     errors.push(ValidationError::InvalidRecursion {
                         binding: binding.name.clone(),
                         neuron: neuron.name.clone(),
-                        reason: "let: binding to self without arguments may cause infinite recursion".to_string(),
+                        reason:
+                            "let: binding to self without arguments may cause infinite recursion"
+                                .to_string(),
                     });
                 }
                 // Otherwise, we allow it and trust the user to have termination conditions
@@ -166,13 +181,24 @@ impl Validator {
         let mut errors = Vec::new();
 
         // Build symbol table for this neuron's graph
-        let symbol_table = Self::build_symbol_table(neuron, connections, program, registry, &mut errors);
+        let symbol_table =
+            Self::build_symbol_table(neuron, connections, program, registry, &mut errors);
 
         // Validate each connection
         for connection in connections {
             // Check that neurons exist
-            errors.extend(Self::check_neurons_exist(&connection.source, &neuron.name, program, registry));
-            errors.extend(Self::check_neurons_exist(&connection.destination, &neuron.name, program, registry));
+            errors.extend(Self::check_neurons_exist(
+                &connection.source,
+                &neuron.name,
+                program,
+                registry,
+            ));
+            errors.extend(Self::check_neurons_exist(
+                &connection.destination,
+                &neuron.name,
+                program,
+                registry,
+            ));
 
             // Validate match expressions - moved to separate pass
             // if let Endpoint::Match(match_expr) = &connection.destination {
@@ -215,7 +241,12 @@ impl Validator {
         }
 
         // Check for cycles (respecting max_cycle_depth if set)
-        errors.extend(Self::detect_cycles(connections, neuron, &symbol_table, program));
+        errors.extend(Self::detect_cycles(
+            connections,
+            neuron,
+            &symbol_table,
+            program,
+        ));
 
         errors
     }
@@ -269,7 +300,15 @@ impl Validator {
                 // Tuple unpacking: source -> (a, b, c)
                 Endpoint::Tuple(port_refs) => {
                     // Source must resolve to multiple ports
-                    match Self::resolve_endpoint_partial(&connection.source, neuron, &table, program, registry, true, errors) {
+                    match Self::resolve_endpoint_partial(
+                        &connection.source,
+                        neuron,
+                        &table,
+                        program,
+                        registry,
+                        true,
+                        errors,
+                    ) {
                         Some(source_ports) => {
                             if source_ports.len() != port_refs.len() {
                                 errors.push(ValidationError::ArityMismatch {
@@ -292,7 +331,15 @@ impl Validator {
                 // Single intermediate node: source -> intermediate
                 Endpoint::Ref(port_ref) if port_ref.node != "in" && port_ref.node != "out" => {
                     // This creates an intermediate node
-                    match Self::resolve_endpoint_partial(&connection.source, neuron, &table, program, registry, true, errors) {
+                    match Self::resolve_endpoint_partial(
+                        &connection.source,
+                        neuron,
+                        &table,
+                        program,
+                        registry,
+                        true,
+                        errors,
+                    ) {
                         Some(source_ports) => {
                             // Add the intermediate node with the source's output ports
                             table.add_node(port_ref.node.clone(), source_ports);
@@ -351,7 +398,8 @@ impl Validator {
                     };
 
                     // Substitute parameters in port shapes
-                    let substituted_ports = Self::substitute_params(ports, &called_neuron.params, args);
+                    let substituted_ports =
+                        Self::substitute_params(ports, &called_neuron.params, args);
                     Ok(substituted_ports)
                 } else if registry.contains(name) {
                     // Primitive neuron - skip detailed port validation
@@ -424,7 +472,9 @@ impl Validator {
         let mut errors = Vec::new();
 
         // Skip Match endpoints
-        if matches!(source_endpoint, Endpoint::Match(_)) || matches!(dest_endpoint, Endpoint::Match(_)) {
+        if matches!(source_endpoint, Endpoint::Match(_))
+            || matches!(dest_endpoint, Endpoint::Match(_))
+        {
             return errors;
         }
 
@@ -433,7 +483,8 @@ impl Validator {
             errors.push(ValidationError::ArityMismatch {
                 expected: dest_ports.len(),
                 got: source_ports.len(),
-                context: format!("{}: {} -> {}",
+                context: format!(
+                    "{}: {} -> {}",
                     context_neuron,
                     Self::endpoint_desc(source_endpoint),
                     Self::endpoint_desc(dest_endpoint)
@@ -461,7 +512,10 @@ impl Validator {
     /// Check if two shapes are compatible
     fn shapes_compatible(source: &Shape, dest: &Shape) -> bool {
         // Find variadic dimensions in both shapes
-        let source_variadic_pos = source.dims.iter().position(|d| matches!(d, Dim::Variadic(_)));
+        let source_variadic_pos = source
+            .dims
+            .iter()
+            .position(|d| matches!(d, Dim::Variadic(_)));
         let dest_variadic_pos = dest.dims.iter().position(|d| matches!(d, Dim::Variadic(_)));
 
         match (source_variadic_pos, dest_variadic_pos) {
@@ -471,13 +525,9 @@ impl Validator {
                 true
             }
             // Source has variadic, dest does not
-            (Some(var_pos), None) => {
-                Self::match_variadic_shape(&source.dims, var_pos, &dest.dims)
-            }
+            (Some(var_pos), None) => Self::match_variadic_shape(&source.dims, var_pos, &dest.dims),
             // Dest has variadic, source does not
-            (None, Some(var_pos)) => {
-                Self::match_variadic_shape(&dest.dims, var_pos, &source.dims)
-            }
+            (None, Some(var_pos)) => Self::match_variadic_shape(&dest.dims, var_pos, &source.dims),
             // Neither has variadic - must match exactly
             (None, None) => {
                 if source.dims.len() != dest.dims.len() {
@@ -512,18 +562,23 @@ impl Validator {
         }
 
         // Substitute in each port
-        ports.iter().map(|port| {
-            Port {
+        ports
+            .iter()
+            .map(|port| Port {
                 name: port.name.clone(),
                 shape: Self::substitute_shape(&port.shape, &bindings),
-            }
-        }).collect()
+            })
+            .collect()
     }
 
     /// Substitute parameter values in a shape
     fn substitute_shape(shape: &Shape, bindings: &HashMap<String, i64>) -> Shape {
         Shape {
-            dims: shape.dims.iter().map(|dim| Self::substitute_dim(dim, bindings)).collect()
+            dims: shape
+                .dims
+                .iter()
+                .map(|dim| Self::substitute_dim(dim, bindings))
+                .collect(),
         }
     }
 
@@ -650,14 +705,17 @@ impl Validator {
                 }
             }
             Endpoint::Tuple(refs) => {
-                format!("({})", refs.iter()
-                    .map(|r| if r.port == "default" {
-                        r.node.clone()
-                    } else {
-                        format!("{}.{}", r.node, r.port)
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", "))
+                format!(
+                    "({})",
+                    refs.iter()
+                        .map(|r| if r.port == "default" {
+                            r.node.clone()
+                        } else {
+                            format!("{}.{}", r.node, r.port)
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
             }
             Endpoint::Match(_) => "match".to_string(),
         }
@@ -681,14 +739,15 @@ impl Validator {
                     vec![]
                 }
             }
-            Endpoint::Match(match_expr) => {
-                match_expr.arms.iter()
-                    .flat_map(|arm| {
-                        arm.pipeline.iter()
-                            .flat_map(|ep| Self::check_neurons_exist(ep, context_neuron, program, registry))
+            Endpoint::Match(match_expr) => match_expr
+                .arms
+                .iter()
+                .flat_map(|arm| {
+                    arm.pipeline.iter().flat_map(|ep| {
+                        Self::check_neurons_exist(ep, context_neuron, program, registry)
                     })
-                    .collect()
-            }
+                })
+                .collect(),
             _ => vec![],
         }
     }
@@ -758,23 +817,19 @@ impl Validator {
 
         for node in graph.keys() {
             if !visited.contains(node) {
-                if let Some(cycle) = Self::dfs_cycle_detect(
-                    node,
-                    &graph,
-                    &mut visited,
-                    &mut rec_stack,
-                    Vec::new(),
-                ) {
+                if let Some(cycle) =
+                    Self::dfs_cycle_detect(node, &graph, &mut visited, &mut rec_stack, Vec::new())
+                {
                     // Check if this cycle is allowed by max_cycle_depth
                     let cycle_depth = cycle.len() - 1; // Subtract 1 because cycle includes start node twice
-                    
+
                     if let Some(max_depth) = neuron.max_cycle_depth {
                         if cycle_depth <= max_depth {
                             // Cycle is within allowed depth, skip error
                             continue;
                         }
                     }
-                    
+
                     errors.push(ValidationError::CycleDetected {
                         cycle,
                         context: context_neuron.to_string(),
@@ -796,7 +851,8 @@ impl Validator {
         match endpoint {
             Endpoint::Call { name, args, .. } => {
                 // Create base signature for this call
-                let args_str = args.iter()
+                let args_str = args
+                    .iter()
                     .map(|v| format!("{:?}", v))
                     .collect::<Vec<_>>()
                     .join(",");
@@ -830,7 +886,8 @@ impl Validator {
         match endpoint {
             Endpoint::Call { name, args, .. } => {
                 // Create base signature for this call
-                let args_str = args.iter()
+                let args_str = args
+                    .iter()
                     .map(|v| format!("{:?}", v))
                     .collect::<Vec<_>>()
                     .join(",");
@@ -866,7 +923,8 @@ impl Validator {
             Endpoint::Call { name, args, .. } => {
                 // Include args in node ID to distinguish different call instances
                 // Format: "NeuronName(arg1,arg2,...)"
-                let args_str = args.iter()
+                let args_str = args
+                    .iter()
                     .map(|v| format!("{:?}", v))
                     .collect::<Vec<_>>()
                     .join(",");
@@ -893,13 +951,9 @@ impl Validator {
         if let Some(neighbors) = graph.get(node) {
             for neighbor in neighbors {
                 if !visited.contains(neighbor) {
-                    if let Some(cycle) = Self::dfs_cycle_detect(
-                        neighbor,
-                        graph,
-                        visited,
-                        rec_stack,
-                        path.clone(),
-                    ) {
+                    if let Some(cycle) =
+                        Self::dfs_cycle_detect(neighbor, graph, visited, rec_stack, path.clone())
+                    {
                         return Some(cycle);
                     }
                 } else if rec_stack.contains(neighbor) {
@@ -920,7 +974,10 @@ impl Validator {
     /// Validate a match expression for exhaustiveness and pattern shadowing
     /// Validate a match expression for exhaustiveness and pattern shadowing
     /// Marks unreachable arms by setting is_reachable = false
-    fn validate_match_expression(match_expr: &mut MatchExpr, context_neuron: &str) -> Vec<ValidationError> {
+    fn validate_match_expression(
+        match_expr: &mut MatchExpr,
+        context_neuron: &str,
+    ) -> Vec<ValidationError> {
         let mut errors = Vec::new();
 
         // Check exhaustiveness: last pattern should be a catch-all
@@ -951,7 +1008,7 @@ impl Validator {
                 if subsumes {
                     // Mark as unreachable
                     match_expr.arms[j].is_reachable = false;
-                    
+
                     // We don't error on shadowing anymore, just mark it
                     // errors.push(ValidationError::UnreachableMatchArm { ... });
                 }
@@ -980,9 +1037,10 @@ impl Validator {
         }
 
         // Non-variadic patterns are catch-all if all dims are wildcards or named (no literals)
-        pattern.dims.iter().all(|d| {
-            matches!(d, Dim::Wildcard | Dim::Named(_))
-        })
+        pattern
+            .dims
+            .iter()
+            .all(|d| matches!(d, Dim::Wildcard | Dim::Named(_)))
     }
 
     /// Check if pattern `general` subsumes (is more general than) pattern `specific`

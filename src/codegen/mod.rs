@@ -15,9 +15,9 @@
 //! ```
 
 // Module organization
+pub mod forward;
 pub mod generator;
 pub mod instantiation;
-pub mod forward;
 pub mod utils;
 
 // Re-exports for public API
@@ -36,39 +36,55 @@ mod tests {
         let neuron = NeuronDef {
             name: "MatchTest".to_string(),
             params: vec![],
-            inputs: vec![Port { name: "default".to_string(), shape: Shape::new(vec![Dim::Wildcard, Dim::Named("dim".to_string())]) }],
-            outputs: vec![Port { name: "default".to_string(), shape: Shape::new(vec![Dim::Wildcard, Dim::Named("dim".to_string())]) }],
+            inputs: vec![Port {
+                name: "default".to_string(),
+                shape: Shape::new(vec![Dim::Wildcard, Dim::Named("dim".to_string())]),
+            }],
+            outputs: vec![Port {
+                name: "default".to_string(),
+                shape: Shape::new(vec![Dim::Wildcard, Dim::Named("dim".to_string())]),
+            }],
+            max_cycle_depth: Some(10),
             body: NeuronBody::Graph {
                 let_bindings: vec![],
                 set_bindings: vec![],
-                connections: vec![
-                    Connection {
-                        source: Endpoint::Ref(PortRef::new("in")),
-                        destination: Endpoint::Match(MatchExpr {
-                            arms: vec![
-                                MatchArm {
-                                    pattern: Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]),
-                                    guard: None,
-                                    pipeline: vec![
-                                        Endpoint::Call { name: "Identity".to_string(), args: vec![], kwargs: vec![], id: 0 },
-                                        Endpoint::Ref(PortRef::new("out"))
-                                    ],
-                                    is_reachable: true,
-                                },
-                                MatchArm {
-                                    pattern: Shape::new(vec![Dim::Wildcard, Dim::Literal(256)]),
-                                    guard: None,
-                                    pipeline: vec![
-                                        Endpoint::Call { name: "Linear".to_string(), args: vec![Value::Int(256), Value::Int(512)], kwargs: vec![], id: 1 },
-                                        Endpoint::Ref(PortRef::new("out"))
-                                    ],
-                                    is_reachable: true,
-                                }
-                            ]
-                        })
-                    }
-                ]
-            }
+                context_bindings: vec![],
+                connections: vec![Connection {
+                    source: Endpoint::Ref(PortRef::new("in")),
+                    destination: Endpoint::Match(MatchExpr {
+                        arms: vec![
+                            MatchArm {
+                                pattern: Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]),
+                                guard: None,
+                                pipeline: vec![
+                                    Endpoint::Call {
+                                        name: "Identity".to_string(),
+                                        args: vec![],
+                                        kwargs: vec![],
+                                        id: 0,
+                                    },
+                                    Endpoint::Ref(PortRef::new("out")),
+                                ],
+                                is_reachable: true,
+                            },
+                            MatchArm {
+                                pattern: Shape::new(vec![Dim::Wildcard, Dim::Literal(256)]),
+                                guard: None,
+                                pipeline: vec![
+                                    Endpoint::Call {
+                                        name: "Linear".to_string(),
+                                        args: vec![Value::Int(256), Value::Int(512)],
+                                        kwargs: vec![],
+                                        id: 1,
+                                    },
+                                    Endpoint::Ref(PortRef::new("out")),
+                                ],
+                                is_reachable: true,
+                            },
+                        ],
+                    }),
+                }],
+            },
         };
 
         program.neurons.insert("MatchTest".to_string(), neuron);
@@ -90,59 +106,71 @@ mod tests {
         let neuron = NeuronDef {
             name: "DynamicMatch".to_string(),
             params: vec![],
-            inputs: vec![Port { name: "default".to_string(), shape: Shape::new(vec![Dim::Wildcard, Dim::Wildcard]) }],
-            outputs: vec![Port { name: "default".to_string(), shape: Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]) }],
+            inputs: vec![Port {
+                name: "default".to_string(),
+                shape: Shape::new(vec![Dim::Wildcard, Dim::Wildcard]),
+            }],
+            outputs: vec![Port {
+                name: "default".to_string(),
+                shape: Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]),
+            }],
+            max_cycle_depth: Some(10),
             body: NeuronBody::Graph {
                 let_bindings: vec![],
                 set_bindings: vec![],
-                connections: vec![
-                Connection {
+                context_bindings: vec![],
+                connections: vec![Connection {
                     source: Endpoint::Ref(PortRef::new("in")),
                     destination: Endpoint::Match(MatchExpr {
                         arms: vec![
                             MatchArm {
-                                pattern: Shape::new(vec![Dim::Wildcard, Dim::Named("d".to_string())]),
+                                pattern: Shape::new(vec![
+                                    Dim::Wildcard,
+                                    Dim::Named("d".to_string()),
+                                ]),
                                 guard: Some(Value::BinOp {
                                     op: BinOp::Gt,
                                     left: Box::new(Value::Name("d".to_string())),
-                                    right: Box::new(Value::Int(512))
+                                    right: Box::new(Value::Int(512)),
                                 }),
                                 pipeline: vec![
                                     Endpoint::Call {
                                         name: "Linear".to_string(),
                                         args: vec![Value::Name("d".to_string()), Value::Int(512)],
                                         kwargs: vec![],
-                                        id: 0
+                                        id: 0,
                                     },
-                                    Endpoint::Ref(PortRef::new("out"))
+                                    Endpoint::Ref(PortRef::new("out")),
                                 ],
                                 is_reachable: true,
                             },
                             MatchArm {
-                                pattern: Shape::new(vec![Dim::Wildcard, Dim::Named("d".to_string())]),
+                                pattern: Shape::new(vec![
+                                    Dim::Wildcard,
+                                    Dim::Named("d".to_string()),
+                                ]),
                                 guard: None,
                                 pipeline: vec![
                                     Endpoint::Call {
                                         name: "Linear".to_string(),
                                         args: vec![Value::Name("d".to_string()), Value::Int(256)],
                                         kwargs: vec![],
-                                        id: 1
+                                        id: 1,
                                     },
                                     Endpoint::Call {
                                         name: "Linear".to_string(),
                                         args: vec![Value::Int(256), Value::Int(512)],
                                         kwargs: vec![],
-                                        id: 2
+                                        id: 2,
                                     },
-                                    Endpoint::Ref(PortRef::new("out"))
+                                    Endpoint::Ref(PortRef::new("out")),
                                 ],
                                 is_reachable: true,
-                            }
-                        ]
-                    })
-                }
-            ]
-            }
+                            },
+                        ],
+                    }),
+                }],
+            },
         };
 
         program.neurons.insert("DynamicMatch".to_string(), neuron);
@@ -151,15 +179,30 @@ mod tests {
         println!("{}", code);
 
         // Verify dimension binding is generated
-        assert!(code.contains("d = x.shape[1]"), "Dimension binding should be generated");
+        assert!(
+            code.contains("d = x.shape[1]"),
+            "Dimension binding should be generated"
+        );
 
         // Verify guard condition includes the bound dimension (on separate line after binding)
-        assert!(code.contains("if d > 512:"), "Guard should reference bound dimension");
+        assert!(
+            code.contains("if d > 512:"),
+            "Guard should reference bound dimension"
+        );
 
         // Verify lazy instantiation for modules with captured dimensions
-        assert!(code.contains("self._linear_") && code.contains("= None"), "Should have lazy instantiation");
-        assert!(code.contains("if self._linear_") && code.contains("is None:"), "Should check for lazy instantiation");
-        assert!(code.contains("Linear(d,"), "Should instantiate Linear with captured dimension");
+        assert!(
+            code.contains("self._linear_") && code.contains("= None"),
+            "Should have lazy instantiation"
+        );
+        assert!(
+            code.contains("if self._linear_") && code.contains("is None:"),
+            "Should check for lazy instantiation"
+        );
+        assert!(
+            code.contains("Linear(d,"),
+            "Should instantiate Linear with captured dimension"
+        );
     }
 
     #[test]
@@ -169,33 +212,43 @@ mod tests {
         let neuron = NeuronDef {
             name: "GuardTest".to_string(),
             params: vec![],
-            inputs: vec![Port { name: "default".to_string(), shape: Shape::new(vec![Dim::Wildcard, Dim::Wildcard]) }],
-            outputs: vec![Port { name: "default".to_string(), shape: Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]) }],
+            inputs: vec![Port {
+                name: "default".to_string(),
+                shape: Shape::new(vec![Dim::Wildcard, Dim::Wildcard]),
+            }],
+            outputs: vec![Port {
+                name: "default".to_string(),
+                shape: Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]),
+            }],
+            max_cycle_depth: Some(10),
             body: NeuronBody::Graph {
                 let_bindings: vec![],
                 set_bindings: vec![],
-                connections: vec![
-                Connection {
+                context_bindings: vec![],
+                connections: vec![Connection {
                     source: Endpoint::Ref(PortRef::new("in")),
                     destination: Endpoint::Match(MatchExpr {
-                        arms: vec![
-                            MatchArm {
-                                pattern: Shape::new(vec![Dim::Wildcard, Dim::Named("dim".to_string())]),
-                                guard: Some(Value::BinOp {
-                                    op: BinOp::Le,
-                                    left: Box::new(Value::Name("dim".to_string())),
-                                    right: Box::new(Value::Int(512))
-                                }),
-                                pipeline: vec![
-                                    Endpoint::Call { name: "Identity".to_string(), args: vec![], kwargs: vec![], id: 0 },
-                                    Endpoint::Ref(PortRef::new("out"))
-                                ],
-                                is_reachable: true,
-                            }
-                        ]
-                    })
-                }
-            ]}
+                        arms: vec![MatchArm {
+                            pattern: Shape::new(vec![Dim::Wildcard, Dim::Named("dim".to_string())]),
+                            guard: Some(Value::BinOp {
+                                op: BinOp::Le,
+                                left: Box::new(Value::Name("dim".to_string())),
+                                right: Box::new(Value::Int(512)),
+                            }),
+                            pipeline: vec![
+                                Endpoint::Call {
+                                    name: "Identity".to_string(),
+                                    args: vec![],
+                                    kwargs: vec![],
+                                    id: 0,
+                                },
+                                Endpoint::Ref(PortRef::new("out")),
+                            ],
+                            is_reachable: true,
+                        }],
+                    }),
+                }],
+            },
         };
 
         program.neurons.insert("GuardTest".to_string(), neuron);
@@ -205,7 +258,10 @@ mod tests {
 
         // Verify dimension is bound before being used in guard
         assert!(code.contains("dim = x.shape[1]"), "Dimension must be bound");
-        assert!(code.contains("if dim <= 512:"), "Guard should use bound dimension");
+        assert!(
+            code.contains("if dim <= 512:"),
+            "Guard should use bound dimension"
+        );
     }
 
     #[test]
@@ -219,27 +275,40 @@ mod tests {
             let neuron = NeuronDef {
                 name: "OptimizedMatch".to_string(),
                 params: vec![],
-                inputs: vec![Port { name: "default".to_string(), shape: Shape::new(vec![Dim::Wildcard, Dim::Wildcard]) }],
-                outputs: vec![Port { name: "default".to_string(), shape: Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]) }],
+                inputs: vec![Port {
+                    name: "default".to_string(),
+                    shape: Shape::new(vec![Dim::Wildcard, Dim::Wildcard]),
+                }],
+                outputs: vec![Port {
+                    name: "default".to_string(),
+                    shape: Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]),
+                }],
+                max_cycle_depth: Some(10),
                 body: NeuronBody::Graph {
-                let_bindings: vec![],
-                set_bindings: vec![],
-                connections: vec![
-                    Connection {
+                    let_bindings: vec![],
+                    set_bindings: vec![],
+                    context_bindings: vec![],
+                    connections: vec![Connection {
                         source: Endpoint::Ref(PortRef::new("in")),
                         destination: Endpoint::Match(MatchExpr {
                             arms: vec![
                                 MatchArm {
-                                    pattern: Shape::new(vec![Dim::Wildcard, Dim::Named("d".to_string())]),
+                                    pattern: Shape::new(vec![
+                                        Dim::Wildcard,
+                                        Dim::Named("d".to_string()),
+                                    ]),
                                     guard: None,
                                     pipeline: vec![
                                         Endpoint::Call {
                                             name: "Linear".to_string(),
-                                            args: vec![Value::Name("d".to_string()), Value::Int(512)],
+                                            args: vec![
+                                                Value::Name("d".to_string()),
+                                                Value::Int(512),
+                                            ],
                                             kwargs: vec![],
-                                            id: 0
+                                            id: 0,
                                         },
-                                        Endpoint::Ref(PortRef::new("out"))
+                                        Endpoint::Ref(PortRef::new("out")),
                                     ],
                                     is_reachable: true,
                                 },
@@ -247,8 +316,13 @@ mod tests {
                                     pattern: Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]),
                                     guard: None,
                                     pipeline: vec![
-                                        Endpoint::Call { name: "Identity".to_string(), args: vec![], kwargs: vec![], id: 1 },
-                                        Endpoint::Ref(PortRef::new("out"))
+                                        Endpoint::Call {
+                                            name: "Identity".to_string(),
+                                            args: vec![],
+                                            kwargs: vec![],
+                                            id: 1,
+                                        },
+                                        Endpoint::Ref(PortRef::new("out")),
                                     ],
                                     is_reachable: true, // All start reachable
                                 },
@@ -256,15 +330,20 @@ mod tests {
                                     pattern: Shape::new(vec![Dim::Wildcard, Dim::Literal(256)]),
                                     guard: None,
                                     pipeline: vec![
-                                        Endpoint::Call { name: "Identity".to_string(), args: vec![], kwargs: vec![], id: 2 },
-                                        Endpoint::Ref(PortRef::new("out"))
+                                        Endpoint::Call {
+                                            name: "Identity".to_string(),
+                                            args: vec![],
+                                            kwargs: vec![],
+                                            id: 2,
+                                        },
+                                        Endpoint::Ref(PortRef::new("out")),
                                     ],
                                     is_reachable: true, // All start reachable
-                                }
-                            ]
-                        })
-                    }
-                ]}
+                                },
+                            ],
+                        }),
+                    }],
+                },
             };
             program.neurons.insert("OptimizedMatch".to_string(), neuron);
             program
@@ -272,7 +351,8 @@ mod tests {
 
         // Generate code with ALL arms reachable
         let all_reachable_program = create_reachable_program();
-        let all_reachable_code = generate_pytorch(&all_reachable_program, "OptimizedMatch").unwrap();
+        let all_reachable_code =
+            generate_pytorch(&all_reachable_program, "OptimizedMatch").unwrap();
 
         // Count branches when all arms are reachable
         let all_reachable_if_count = all_reachable_code.matches("if x.ndim").count();
@@ -281,7 +361,12 @@ mod tests {
         // Now mark some as unreachable (simulating validator) and optimize
         let mut marked_program = create_reachable_program();
         // Mark the shadowed arms as unreachable (simulating validator output)
-        if let NeuronBody::Graph { connections, .. } = &mut marked_program.neurons.get_mut("OptimizedMatch").unwrap().body {
+        if let NeuronBody::Graph { connections, .. } = &mut marked_program
+            .neurons
+            .get_mut("OptimizedMatch")
+            .unwrap()
+            .body
+        {
             if let Endpoint::Match(match_expr) = &mut connections[0].destination {
                 match_expr.arms[1].is_reachable = false; // [*, 512] shadowed by [*, d]
                 match_expr.arms[2].is_reachable = false; // [*, 256] shadowed by [*, d]
@@ -300,11 +385,21 @@ mod tests {
 
         println!("=== ALL ARMS REACHABLE (BEFORE VALIDATOR) ===");
         println!("{}", all_reachable_code);
-        println!("All reachable: {} if, {} elif = {} total", all_reachable_if_count, all_reachable_elif_count, all_reachable_if_count + all_reachable_elif_count);
+        println!(
+            "All reachable: {} if, {} elif = {} total",
+            all_reachable_if_count,
+            all_reachable_elif_count,
+            all_reachable_if_count + all_reachable_elif_count
+        );
 
         println!("\n=== AFTER OPTIMIZATION (PRUNED DEAD ARMS) ===");
         println!("{}", optimized_code);
-        println!("Optimized: {} if, {} elif = {} total", optimized_if_count, optimized_elif_count, optimized_if_count + optimized_elif_count);
+        println!(
+            "Optimized: {} if, {} elif = {} total",
+            optimized_if_count,
+            optimized_elif_count,
+            optimized_if_count + optimized_elif_count
+        );
 
         // Verify we had more branches before pruning (3 arms means multiple branches)
         assert!(
@@ -314,16 +409,34 @@ mod tests {
         );
 
         // Verify we have only 1 branch after pruning
-        assert_eq!(optimized_if_count, 1, "Should have only 1 if statement after pruning");
-        assert_eq!(optimized_elif_count, 0, "Should have no elif statements after pruning");
+        assert_eq!(
+            optimized_if_count, 1,
+            "Should have only 1 if statement after pruning"
+        );
+        assert_eq!(
+            optimized_elif_count, 0,
+            "Should have no elif statements after pruning"
+        );
 
         // Verify the Identity modules are NOT in optimized code (arms pruned)
-        assert!(!optimized_code.contains("self.identity_"), "Pruned arms should not generate module instantiation");
-        assert!(!optimized_code.contains("Identity"), "Identity import should be removed");
+        assert!(
+            !optimized_code.contains("self.identity_"),
+            "Pruned arms should not generate module instantiation"
+        );
+        assert!(
+            !optimized_code.contains("Identity"),
+            "Identity import should be removed"
+        );
 
         // Verify the Linear module IS in optimized code
-        assert!(optimized_code.contains("self._linear_"), "Reachable arm should generate module");
-        assert!(optimized_code.contains("from neuroscript_runtime.primitives.linear import Linear"), "Linear import should remain");
+        assert!(
+            optimized_code.contains("self._linear_"),
+            "Reachable arm should generate module"
+        );
+        assert!(
+            optimized_code.contains("from neuroscript_runtime.primitives.linear import Linear"),
+            "Linear import should remain"
+        );
     }
 
     #[test]
@@ -335,47 +448,65 @@ mod tests {
         let neuron = NeuronDef {
             name: "GuardedMatch".to_string(),
             params: vec![],
-            inputs: vec![Port { name: "default".to_string(), shape: Shape::new(vec![Dim::Wildcard, Dim::Wildcard]) }],
-            outputs: vec![Port { name: "default".to_string(), shape: Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]) }],
+            inputs: vec![Port {
+                name: "default".to_string(),
+                shape: Shape::new(vec![Dim::Wildcard, Dim::Wildcard]),
+            }],
+            outputs: vec![Port {
+                name: "default".to_string(),
+                shape: Shape::new(vec![Dim::Wildcard, Dim::Literal(512)]),
+            }],
+            max_cycle_depth: Some(10),
             body: NeuronBody::Graph {
                 let_bindings: vec![],
                 set_bindings: vec![],
-                connections: vec![
-                Connection {
+                context_bindings: vec![],
+                connections: vec![Connection {
                     source: Endpoint::Ref(PortRef::new("in")),
                     destination: Endpoint::Match(MatchExpr {
                         arms: vec![
                             MatchArm {
-                                pattern: Shape::new(vec![Dim::Wildcard, Dim::Named("d".to_string())]),
+                                pattern: Shape::new(vec![
+                                    Dim::Wildcard,
+                                    Dim::Named("d".to_string()),
+                                ]),
                                 guard: Some(Value::BinOp {
                                     op: BinOp::Gt,
                                     left: Box::new(Value::Name("d".to_string())),
-                                    right: Box::new(Value::Int(512))
+                                    right: Box::new(Value::Int(512)),
                                 }),
                                 pipeline: vec![
                                     Endpoint::Call {
                                         name: "Linear".to_string(),
                                         args: vec![Value::Name("d".to_string()), Value::Int(512)],
                                         kwargs: vec![],
-                                        id: 0
+                                        id: 0,
                                     },
-                                    Endpoint::Ref(PortRef::new("out"))
+                                    Endpoint::Ref(PortRef::new("out")),
                                 ],
                                 is_reachable: true,
                             },
                             MatchArm {
-                                pattern: Shape::new(vec![Dim::Wildcard, Dim::Named("d".to_string())]),
+                                pattern: Shape::new(vec![
+                                    Dim::Wildcard,
+                                    Dim::Named("d".to_string()),
+                                ]),
                                 guard: None, // Catch-all for same pattern
                                 pipeline: vec![
-                                    Endpoint::Call { name: "Identity".to_string(), args: vec![], kwargs: vec![], id: 1 },
-                                    Endpoint::Ref(PortRef::new("out"))
+                                    Endpoint::Call {
+                                        name: "Identity".to_string(),
+                                        args: vec![],
+                                        kwargs: vec![],
+                                        id: 1,
+                                    },
+                                    Endpoint::Ref(PortRef::new("out")),
                                 ],
                                 is_reachable: true, // Guard makes this reachable
-                            }
-                        ]
-                    })
-                }
-            ]}
+                            },
+                        ],
+                    }),
+                }],
+            },
         };
 
         program.neurons.insert("GuardedMatch".to_string(), neuron);
@@ -401,7 +532,7 @@ mod tests {
     #[test]
     fn test_codegen_roundtrip_parse_validate_optimize() {
         // Integration test: parse → validate → optimize → codegen
-        use crate::{parse, validate, optimizer::optimize_matches};
+        use crate::{optimizer::optimize_matches, parse, validate};
 
         let source = r#"
 neuron OptimizeDemo:
@@ -421,7 +552,10 @@ neuron OptimizeDemo:
         let validation_result = validate(&mut program);
         // Note: validator may error about shadowing, but for this test we continue
         if let Err(validation_errors) = validation_result {
-            println!("Validation errors (expected for shadowed arms): {} errors", validation_errors.len());
+            println!(
+                "Validation errors (expected for shadowed arms): {} errors",
+                validation_errors.len()
+            );
             for err in &validation_errors {
                 println!("  - {:?}", err);
             }

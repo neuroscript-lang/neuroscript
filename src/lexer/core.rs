@@ -1,7 +1,7 @@
 //! Core lexer implementation
 
-use miette::SourceSpan;
 use crate::interfaces::*;
+use miette::SourceSpan;
 
 impl<'a> Lexer<'a> {
     pub fn new(source: &'a str) -> Self {
@@ -149,6 +149,30 @@ impl<'a> Lexer<'a> {
 
             '`' => self.string()?,
 
+            '@' => {
+                // Annotations: @static, @global, @lazy
+                let mut s = String::new();
+                while let Some(ch) = self.peek() {
+                    if ch.is_ascii_alphabetic() {
+                        s.push(ch);
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+                match s.as_str() {
+                    "static" => TokenKind::AtStatic,
+                    "global" => TokenKind::AtGlobal,
+                    "lazy" => TokenKind::AtLazy,
+                    _ => {
+                        return Err(LexError::UnexpectedChar {
+                            ch,
+                            span: self.make_span(start_pos).into(),
+                        })
+                    }
+                }
+            }
+
             c if c.is_ascii_digit() => self.number(c)?,
 
             c if c.is_ascii_alphabetic() || c == '_' => self.ident_or_keyword(c),
@@ -292,7 +316,11 @@ impl<'a> Lexer<'a> {
                 // Look ahead to make sure it's a decimal point, not method call
                 let mut chars = self.chars.clone();
                 chars.next(); // skip the dot
-                if chars.peek().map(|(_, c)| c.is_ascii_digit()).unwrap_or(false) {
+                if chars
+                    .peek()
+                    .map(|(_, c)| c.is_ascii_digit())
+                    .unwrap_or(false)
+                {
                     is_float = true;
                     s.push(ch);
                     self.advance();
@@ -338,6 +366,7 @@ impl<'a> Lexer<'a> {
             "out" => TokenKind::Out,
             "impl" => TokenKind::Impl,
             "graph" => TokenKind::Graph,
+            "context" => TokenKind::Context,
             "match" => TokenKind::Match,
             "where" => TokenKind::Where,
             "external" => TokenKind::External,
