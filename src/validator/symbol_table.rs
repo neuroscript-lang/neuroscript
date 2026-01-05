@@ -96,6 +96,26 @@ where
         substitute_params_fn,
     };
 
+    // Add context bindings as nodes
+    if let NeuronBody::Graph {
+        context_bindings, ..
+    } = &neuron.body
+    {
+        // Process unified context bindings
+        for binding in context_bindings {
+            let endpoint = Endpoint::Call {
+                name: binding.call_name.clone(),
+                args: binding.args.clone(),
+                kwargs: binding.kwargs.clone(),
+                id: 0,
+                frozen: binding.frozen,
+            };
+            if let Some(ports) = resolve_endpoint_partial(&endpoint, &ctx, &table, true, errors) {
+                table.add_node(binding.name.clone(), ports);
+            }
+        }
+    }
+
     // Scan connections for intermediate node creation
     for connection in connections {
         match &connection.destination {
@@ -124,14 +144,17 @@ where
             }
             // Single intermediate node: source -> intermediate
             Endpoint::Ref(port_ref) if port_ref.node != "in" && port_ref.node != "out" => {
-                // This creates an intermediate node
-                match resolve_endpoint_partial(&connection.source, &ctx, &table, true, errors) {
-                    Some(source_ports) => {
-                        // Add the intermediate node with the source's output ports
-                        table.add_node(port_ref.node.clone(), source_ports);
-                    }
-                    None => {
-                        // Error already added by resolve_endpoint_partial
+                // This creates an intermediate node if it's not already in the table
+                // (e.g. not a context binding)
+                if table.get_ports(&port_ref.node).is_none() {
+                    match resolve_endpoint_partial(&connection.source, &ctx, &table, true, errors) {
+                        Some(source_ports) => {
+                            // Add the intermediate node with the source's output ports
+                            table.add_node(port_ref.node.clone(), source_ports);
+                        }
+                        None => {
+                            // Error already added by resolve_endpoint_partial
+                        }
                     }
                 }
             }
@@ -177,7 +200,7 @@ where
 {
     match endpoint {
         Endpoint::Call { name, args, .. } => {
-            // Look up neuron definition
+            // 1. Look up neuron definition
             if let Some(called_neuron) = ctx.program.neurons.get(name) {
                 let ports = if is_source {
                     &called_neuron.outputs
@@ -188,8 +211,41 @@ where
                 // Substitute parameters in port shapes
                 let substituted_ports =
                     (ctx.substitute_params_fn)(ports, &called_neuron.params, args);
-                Ok(substituted_ports)
-            } else if ctx.registry.contains(name) {
+                return Ok(substituted_ports);
+            }
+
+            // 2. Look up global names
+            if let Some(global) = ctx.program.globals.iter().find(|g| &g.name == name) {
+                match &global.value {
+                    Value::Call {
+                        name: c_name,
+                        args: c_args,
+                        kwargs: _,
+                    } => {
+                        // Nested call resolution for global neurons
+                        let sub_endpoint = Endpoint::Call {
+                            name: c_name.clone(),
+                            args: c_args.clone(),
+                            kwargs: vec![],
+                            id: 0,
+                            frozen: false,
+                        };
+                        return resolve_endpoint(&sub_endpoint, ctx, symbol_table, is_source);
+                    }
+                    _ => {
+                        // For simple global values (int, float, etc.),
+                        // they don't have ports. This should probably error
+                        // if used as a neuron call.
+                        return Err(Box::new(ValidationError::Custom(format!(
+                            "Global name '{}' is a value, not a neuron",
+                            name
+                        ))));
+                    }
+                }
+            }
+
+            // 3. Look up registry
+            if ctx.registry.contains(name) {
                 // Primitive neuron - skip detailed port validation
                 // Primitives are validated at codegen time
                 // Return a dummy port to allow validation to continue

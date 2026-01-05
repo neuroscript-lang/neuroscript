@@ -716,7 +716,8 @@ fn test_parse_residual_example() {
             name: "Fork".to_string(),
             args: vec![],
             kwargs: vec![],
-            id: 3
+            id: 3,
+            frozen: false,
         }
     );
 
@@ -727,7 +728,8 @@ fn test_parse_residual_example() {
             name: "Fork".to_string(),
             args: vec![],
             kwargs: vec![],
-            id: 3
+            id: 3,
+            frozen: false,
         }
     );
     assert_eq!(
@@ -746,7 +748,8 @@ fn test_parse_residual_example() {
             name: "MLP".to_string(),
             args: vec![Value::Name("dim".to_string())],
             kwargs: vec![],
-            id: 4
+            id: 4,
+            frozen: false,
         }
     );
 
@@ -757,7 +760,8 @@ fn test_parse_residual_example() {
             name: "MLP".to_string(),
             args: vec![Value::Name("dim".to_string())],
             kwargs: vec![],
-            id: 4
+            id: 4,
+            frozen: false,
         }
     );
     assert_eq!(
@@ -776,7 +780,8 @@ fn test_parse_residual_example() {
             name: "Add".to_string(),
             args: vec![],
             kwargs: vec![],
-            id: 5
+            id: 5,
+            frozen: false,
         }
     );
 
@@ -787,7 +792,8 @@ fn test_parse_residual_example() {
             name: "Add".to_string(),
             args: vec![],
             kwargs: vec![],
-            id: 5
+            id: 5,
+            frozen: false,
         }
     );
     assert_eq!(

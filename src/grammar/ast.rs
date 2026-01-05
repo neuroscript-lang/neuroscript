@@ -8,8 +8,9 @@ use pest::iterators::Pair;
 use crate::grammar::error;
 use crate::grammar::Rule;
 use crate::interfaces::{
-    BinOp, Binding, Connection, Dim, DimExpr, Endpoint, ImplRef, MatchArm, MatchExpr, NeuronBody,
-    NeuronDef, Param, ParseError, Port, PortRef, Program, Shape, UseStmt, Value,
+    BinOp, Binding, Connection, Dim, DimExpr, Endpoint, GlobalBinding, ImplRef, MatchArm,
+    MatchExpr, NeuronBody, NeuronDef, Param, ParseError, Port, PortRef, Program, Shape, UseStmt,
+    Value,
 };
 use crate::CallArgs;
 use crate::CallExpr;
@@ -26,8 +27,6 @@ pub struct AstBuilder {
 struct NeuronBuilderState {
     inputs: Vec<Port>,
     outputs: Vec<Port>,
-    let_bindings: Vec<Binding>,
-    set_bindings: Vec<Binding>,
     context_bindings: Vec<Binding>,
     connections: Vec<Connection>,
     impl_ref: Option<ImplRef>,
@@ -56,6 +55,10 @@ impl AstBuilder {
                     let use_stmt = self.build_use_stmt(inner)?;
                     program.uses.push(use_stmt);
                 }
+                Rule::global_decl => {
+                    let global = self.build_global_decl(inner)?;
+                    program.globals.push(global);
+                }
                 Rule::neuron_def => {
                     let neuron = self.build_neuron_def(inner)?;
                     let offset = 0; // TODO: track proper offset
@@ -71,6 +74,39 @@ impl AstBuilder {
         }
 
         Ok(program)
+    }
+
+    /// Build a GlobalBinding from a global_decl pair
+    fn build_global_decl(&mut self, pair: Pair<Rule>) -> Result<GlobalBinding, ParseError> {
+        debug_assert_eq!(pair.as_rule(), Rule::global_decl);
+
+        let mut inner = pair.into_inner();
+        inner.next(); // Skip at
+        inner.next(); // Skip keyword_global
+
+        let content = inner.next().unwrap();
+        match content.as_rule() {
+            Rule::binding => {
+                let binding = self.build_binding(content)?;
+                // Convert Binding to GlobalBinding (if it's a call)
+                Ok(GlobalBinding {
+                    name: binding.name,
+                    value: Value::Call {
+                        name: binding.call_name,
+                        args: binding.args,
+                        kwargs: binding.kwargs,
+                    },
+                })
+            }
+            Rule::global_value_binding => {
+                let mut v_inner = content.into_inner();
+                let name = self.extract_ident(v_inner.next().unwrap())?;
+                v_inner.next(); // Skip assign
+                let value = self.build_value(v_inner.next().unwrap())?;
+                Ok(GlobalBinding { name, value })
+            }
+            _ => unreachable!(),
+        }
     }
 
     /// Build a UseStmt from a use_stmt pair
@@ -150,8 +186,6 @@ impl AstBuilder {
             NeuronBody::Primitive(impl_ref_val)
         } else {
             NeuronBody::Graph {
-                let_bindings: state.let_bindings,
-                set_bindings: state.set_bindings,
                 context_bindings: state.context_bindings,
                 connections: state.connections,
             }
@@ -191,14 +225,6 @@ impl AstBuilder {
             Rule::out_section => {
                 let ports = self.build_out_section(section)?;
                 state.outputs.extend(ports);
-            }
-            Rule::let_section => {
-                let bindings = self.build_let_section(section)?;
-                state.let_bindings.extend(bindings);
-            }
-            Rule::set_section => {
-                let bindings = self.build_set_section(section)?;
-                state.set_bindings.extend(bindings);
             }
             Rule::context_section => {
                 let bindings = self.build_context_section(section)?;
@@ -401,36 +427,6 @@ impl AstBuilder {
         }
     }
 
-    /// Build bindings from let_section
-    fn build_let_section(&mut self, pair: Pair<Rule>) -> Result<Vec<Binding>, ParseError> {
-        debug_assert_eq!(pair.as_rule(), Rule::let_section);
-
-        let mut bindings = vec![];
-
-        for inner in pair.into_inner() {
-            if inner.as_rule() == Rule::binding {
-                bindings.push(self.build_binding(inner)?);
-            }
-        }
-
-        Ok(bindings)
-    }
-
-    /// Build bindings from set_section
-    fn build_set_section(&mut self, pair: Pair<Rule>) -> Result<Vec<Binding>, ParseError> {
-        debug_assert_eq!(pair.as_rule(), Rule::set_section);
-
-        let mut bindings = vec![];
-
-        for inner in pair.into_inner() {
-            if inner.as_rule() == Rule::binding {
-                bindings.push(self.build_binding(inner)?);
-            }
-        }
-
-        Ok(bindings)
-    }
-
     /// Build bindings from context_section
     fn build_context_section(&mut self, pair: Pair<Rule>) -> Result<Vec<Binding>, ParseError> {
         debug_assert_eq!(pair.as_rule(), Rule::context_section);
@@ -486,7 +482,7 @@ impl AstBuilder {
         }
     }
 
-    /// Build a binding (name = Call(args))
+    /// Build a binding (name = neuron_expr)
     fn build_binding(&mut self, pair: Pair<Rule>) -> Result<Binding, ParseError> {
         debug_assert_eq!(pair.as_rule(), Rule::binding);
 
@@ -496,8 +492,8 @@ impl AstBuilder {
         // Skip assign
         inner.next();
 
-        let call = inner.next().unwrap();
-        let (call_name, args, kwargs) = self.build_call_expr(call)?;
+        let neuron_expr = inner.next().unwrap();
+        let (call_name, args, kwargs, frozen) = self.build_neuron_expr(neuron_expr)?;
 
         Ok(Binding {
             name,
@@ -505,7 +501,58 @@ impl AstBuilder {
             args,
             kwargs,
             scope: crate::interfaces::Scope::Instance { lazy: false },
+            frozen,
         })
+    }
+
+    /// Build a neuron expression (Call or Freeze or Ref)
+    /// Returns (name, args, kwargs, frozen)
+    fn build_neuron_expr(
+        &mut self,
+        pair: Pair<Rule>,
+    ) -> Result<(String, Vec<Value>, Vec<Kwarg>, bool), ParseError> {
+        debug_assert_eq!(pair.as_rule(), Rule::neuron_expr);
+
+        let inner = pair.into_inner().next().unwrap();
+        match inner.as_rule() {
+            Rule::call_expr => {
+                let (name, args, kwargs) = self.build_call_expr(inner)?;
+                Ok((name, args, kwargs, false))
+            }
+            Rule::ident => {
+                let name = inner.as_str().to_string();
+                Ok((name, vec![], vec![], false))
+            }
+            Rule::neuron_expr => {
+                // This is the recursive Freeze(...) case
+                // Rule: keyword_freeze ~ lparen ~ neuron_expr ~ rparen
+                // Note: pair.into_inner() above already gave us the First alternative or Second.
+                // If it peaked neuron_expr again, it's the Freeze case.
+
+                // Wait, if it's keyword_freeze, it's the first alternative.
+                // Let's re-examine neuroscript.pest:
+                // neuron_expr = { (keyword_freeze ~ lparen ~ neuron_expr ~ rparen) | call_expr }
+
+                let mut f_inner = inner.into_inner();
+                f_inner.next(); // Skip keyword_freeze
+                f_inner.next(); // Skip lparen
+                let sub_expr = f_inner.next().unwrap();
+                let (sub_name, sub_args, sub_kwargs, _) = self.build_neuron_expr(sub_expr)?;
+
+                // Wrap in Freeze call
+                Ok((
+                    "Freeze".to_string(),
+                    vec![Value::Call {
+                        name: sub_name,
+                        args: sub_args,
+                        kwargs: sub_kwargs,
+                    }],
+                    vec![],
+                    true, // Mark as frozen
+                ))
+            }
+            _ => unreachable!("Unexpected rule in neuron_expr: {:?}", inner.as_rule()),
+        }
     }
 
     /// Build a call expression, returning (name, args, kwargs)
@@ -767,31 +814,19 @@ impl AstBuilder {
         Ok(Endpoint::Ref(PortRef::new(node)))
     }
 
-    /// Build a call endpoint (Name(args))
+    /// Build a call endpoint (Name(args) or Freeze(Name(args)))
     fn build_call_endpoint(&mut self, pair: Pair<Rule>) -> Result<Endpoint, ParseError> {
         debug_assert_eq!(pair.as_rule(), Rule::call_endpoint);
 
-        let mut inner = pair.into_inner();
-        let name = self.extract_ident(inner.next().unwrap())?;
-
-        let mut args = vec![];
-        let mut kwargs = vec![];
-
-        // Skip lparen
-        inner.next();
-
-        // Parse call_args if present
-        if let Some(args_pair) = inner.next() {
-            if args_pair.as_rule() == Rule::call_args {
-                (args, kwargs) = self.build_call_args(args_pair)?;
-            }
-        }
+        let neuron_expr = pair.into_inner().next().unwrap();
+        let (name, args, kwargs, frozen) = self.build_neuron_expr(neuron_expr)?;
 
         Ok(Endpoint::Call {
             name,
             args,
             kwargs,
             id: self.next_id(),
+            frozen,
         })
     }
 

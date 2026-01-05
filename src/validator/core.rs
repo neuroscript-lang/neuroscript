@@ -18,23 +18,33 @@ impl Validator {
         let mut errors = Vec::new();
         let registry = StdlibRegistry::new();
 
-        // Check each neuron (read-only pass for structure)
+        // 1. Validate global declarations
+        for global in &program.globals {
+            // Globals can be calls or simple values
+            if let Value::Call { name, .. } = &global.value {
+                if !Self::neuron_exists(name, program, &registry) {
+                    errors.push(ValidationError::MissingNeuron {
+                        name: name.clone(),
+                        context: format!("global declaration '{}'", global.name),
+                    });
+                }
+            }
+        }
+
+        // 2. Check each neuron (read-only pass for structure)
         // We use a scope to limit the borrow of program
         {
             for neuron in program.neurons.values() {
                 // Validate connections within this neuron if it's composite
                 if let NeuronBody::Graph {
-                    let_bindings,
-                    set_bindings,
-                    context_bindings: _,
+                    context_bindings,
                     connections,
                 } = &neuron.body
                 {
                     // Validate bindings first
                     errors.extend(bindings::validate_bindings(
                         neuron,
-                        let_bindings,
-                        set_bindings,
+                        context_bindings,
                         program,
                         &registry,
                         Self::neuron_exists,

@@ -288,8 +288,6 @@ impl Parser {
         // Parse ports and body
         let mut inputs = vec![];
         let mut outputs = vec![];
-        let mut let_bindings = vec![];
-        let mut set_bindings = vec![];
         let mut context_bindings = vec![];
         let mut graph_connections = None;
         let mut impl_ref = None;
@@ -326,14 +324,6 @@ impl Parser {
                         outputs.push(port);
                     }
                 }
-                TokenKind::Let => {
-                    let bindings = self.parse_section(&TokenKind::Let, |p| p.parse_binding())?;
-                    let_bindings.extend(bindings);
-                }
-                TokenKind::Set => {
-                    let bindings = self.parse_section(&TokenKind::Set, |p| p.parse_binding())?;
-                    set_bindings.extend(bindings);
-                }
                 TokenKind::Impl => {
                     let impl_ref_item =
                         self.parse_single_section(&TokenKind::Impl, |p| p.impl_item())?;
@@ -365,18 +355,13 @@ impl Parser {
             NeuronBody::Primitive(impl_ref_item)
         } else if let Some(connections) = graph_connections {
             NeuronBody::Graph {
-                let_bindings,
-                set_bindings,
                 context_bindings,
                 connections,
             }
         } else {
             // If no impl or graph but we have bindings, treat as graph with empty connections
-            if !let_bindings.is_empty() || !set_bindings.is_empty() || !context_bindings.is_empty()
-            {
+            if !context_bindings.is_empty() {
                 NeuronBody::Graph {
-                    let_bindings,
-                    set_bindings,
                     context_bindings,
                     connections: vec![],
                 }
@@ -529,6 +514,12 @@ impl Parser {
             } else {
                 Ok(Dim::Named(name))
             }
+        } else if self.at(&TokenKind::LParen) {
+            // Parenthesized expression for dimensions
+            self.advance();
+            let expr = self.dim()?;
+            self.expect(&TokenKind::RParen)?;
+            Ok(expr)
         } else {
             Err(ParseError::Expected {
                 expected: "dimension".to_string(),
@@ -587,27 +578,6 @@ impl Parser {
         Ok(connection_groups.into_iter().flatten().collect())
     }
 
-    // Parse a binding: name = NeuronCall(args)
-    fn parse_binding(&mut self) -> Result<Binding, ParseError> {
-        let name = self.ident()?;
-        self.expect(&TokenKind::Assign)?;
-
-        // Parse the neuron call
-        let call_name = self.ident()?;
-        self.expect(&TokenKind::LParen)?;
-        let (args, kwargs) = self.call_args()?;
-        self.expect(&TokenKind::RParen)?;
-        self.expect(&TokenKind::Newline)?;
-
-        Ok(Binding {
-            name,
-            call_name,
-            args,
-            kwargs,
-            scope: Scope::Instance { lazy: false },
-        })
-    }
-
     // [annotations] name = NeuronCall(args)
     fn parse_context_binding(&mut self) -> Result<Binding, ParseError> {
         let mut scope = Scope::Instance { lazy: false };
@@ -648,6 +618,7 @@ impl Parser {
             args,
             kwargs,
             scope,
+            frozen: false,
         })
     }
 
@@ -781,6 +752,7 @@ impl Parser {
                     args,
                     kwargs,
                     id: self.next_id(),
+                    frozen: false,
                 })
             } else {
                 Ok(Endpoint::Ref(PortRef::new(name)))

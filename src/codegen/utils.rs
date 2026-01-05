@@ -90,6 +90,7 @@ pub(super) fn endpoint_key_impl(endpoint: &Endpoint) -> String {
             args,
             kwargs,
             id,
+            frozen: _,
         } => {
             let args_str = args
                 .iter()

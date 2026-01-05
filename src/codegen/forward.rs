@@ -50,6 +50,12 @@ pub(super) fn generate_forward_body(
     // Don't clear var_names - preserve module bindings from __init__
     // Only add/override with input port mappings
 
+    // Map global names (available in all neurons)
+    for global in &gen.program.globals {
+        gen.var_names
+            .insert(global.name.clone(), global.name.clone());
+    }
+
     // Map input ports to initial variables
     if inputs.len() == 1 && inputs[0] == "default" {
         gen.var_names.insert("in".to_string(), "x".to_string());
@@ -251,6 +257,7 @@ fn process_destination(
             args,
             kwargs,
             id,
+            frozen: _,
         } => {
             // Generate a call to the module
             let key = endpoint_key_impl(endpoint);

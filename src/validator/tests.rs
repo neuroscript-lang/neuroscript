@@ -76,8 +76,6 @@ fn test_missing_neuron_in_call() {
         }],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![Connection {
                 source: Endpoint::Ref(PortRef::new("in")),
@@ -86,6 +84,7 @@ fn test_missing_neuron_in_call() {
                     args: vec![],
                     kwargs: vec![],
                     id: 0,
+                    frozen: false,
                 },
             }],
         },
@@ -117,8 +116,6 @@ fn test_missing_neuron_in_match() {
         }],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![Connection {
                 source: Endpoint::Ref(PortRef::new("in")),
@@ -131,6 +128,7 @@ fn test_missing_neuron_in_match() {
                             args: vec![],
                             kwargs: vec![],
                             id: 0,
+                            frozen: false,
                         }],
                         is_reachable: true,
                     }],
@@ -196,8 +194,6 @@ fn test_arity_mismatch_call_to_call() {
         }],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![Connection {
                 source: Endpoint::Call {
@@ -205,12 +201,14 @@ fn test_arity_mismatch_call_to_call() {
                     args: vec![],
                     kwargs: vec![],
                     id: 0,
+                    frozen: false,
                 },
                 destination: Endpoint::Call {
                     name: "OneIn".to_string(),
                     args: vec![],
                     kwargs: vec![],
                     id: 0,
+                    frozen: false,
                 },
             }],
         },
@@ -253,8 +251,6 @@ fn test_arity_mismatch_tuple_unpacking() {
         }],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![Connection {
                 source: Endpoint::Call {
@@ -262,6 +258,7 @@ fn test_arity_mismatch_tuple_unpacking() {
                     args: vec![],
                     kwargs: vec![],
                     id: 0,
+                    frozen: false,
                 },
                 destination: Endpoint::Tuple(vec![PortRef::new("a"), PortRef::new("b")]),
             }],
@@ -343,8 +340,6 @@ fn test_arity_mismatch_tuple_to_call() {
         }],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![
                 // Fork creates (a, b)
@@ -355,6 +350,7 @@ fn test_arity_mismatch_tuple_to_call() {
                         args: vec![],
                         kwargs: vec![],
                         id: 0,
+                        frozen: false,
                     },
                 },
                 Connection {
@@ -363,6 +359,7 @@ fn test_arity_mismatch_tuple_to_call() {
                         args: vec![],
                         kwargs: vec![],
                         id: 0,
+                        frozen: false,
                     },
                     destination: Endpoint::Tuple(vec![PortRef::new("a"), PortRef::new("b")]),
                 },
@@ -374,6 +371,7 @@ fn test_arity_mismatch_tuple_to_call() {
                         args: vec![],
                         kwargs: vec![],
                         id: 0,
+                        frozen: false,
                     },
                 },
             ],
@@ -421,8 +419,6 @@ fn test_shape_mismatch_literal() {
         }],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![Connection {
                 source: Endpoint::Call {
@@ -430,12 +426,14 @@ fn test_shape_mismatch_literal() {
                     args: vec![],
                     kwargs: vec![],
                     id: 0,
+                    frozen: false,
                 },
                 destination: Endpoint::Call {
                     name: "In256".to_string(),
                     args: vec![],
                     kwargs: vec![],
                     id: 0,
+                    frozen: false,
                 },
             }],
         },
@@ -475,8 +473,6 @@ fn test_shape_mismatch_multi_dim() {
         }],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![Connection {
                 source: Endpoint::Call {
@@ -484,12 +480,14 @@ fn test_shape_mismatch_multi_dim() {
                     args: vec![],
                     kwargs: vec![],
                     id: 0,
+                    frozen: false,
                 },
                 destination: Endpoint::Call {
                     name: "In256".to_string(),
                     args: vec![],
                     kwargs: vec![],
                     id: 0,
+                    frozen: false,
                 },
             }],
         },
@@ -529,8 +527,6 @@ fn test_shape_match_exact() {
         }],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![Connection {
                 source: Endpoint::Call {
@@ -538,12 +534,14 @@ fn test_shape_match_exact() {
                     args: vec![],
                     kwargs: vec![],
                     id: 0,
+                    frozen: false,
                 },
                 destination: Endpoint::Call {
                     name: "In512".to_string(),
                     args: vec![],
                     kwargs: vec![],
                     id: 0,
+                    frozen: false,
                 },
             }],
         },
@@ -579,8 +577,6 @@ fn test_simple_cycle() {
         }],
         max_cycle_depth: None,
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![
                 Connection {
@@ -589,12 +585,14 @@ fn test_simple_cycle() {
                         args: vec![],
                         kwargs: vec![],
                         id: 0,
+                        frozen: false,
                     },
                     destination: Endpoint::Call {
                         name: "B".to_string(),
                         args: vec![],
                         kwargs: vec![],
                         id: 0,
+                        frozen: false,
                     },
                 },
                 Connection {
@@ -603,12 +601,14 @@ fn test_simple_cycle() {
                         args: vec![],
                         kwargs: vec![],
                         id: 0,
+                        frozen: false,
                     },
                     destination: Endpoint::Call {
                         name: "A".to_string(),
                         args: vec![],
                         kwargs: vec![],
                         id: 0,
+                        frozen: false,
                     },
                 },
             ],
@@ -664,8 +664,6 @@ fn test_cycle_through_unpacked_ports() {
         }],
         max_cycle_depth: None,
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![
                 Connection {
@@ -674,12 +672,14 @@ fn test_cycle_through_unpacked_ports() {
                         args: vec![],
                         kwargs: vec![],
                         id: 0,
+                        frozen: false,
                     },
                     destination: Endpoint::Call {
                         name: "Fork".to_string(),
                         args: vec![],
                         kwargs: vec![],
                         id: 0,
+                        frozen: false,
                     },
                 },
                 Connection {
@@ -688,6 +688,7 @@ fn test_cycle_through_unpacked_ports() {
                         args: vec![],
                         kwargs: vec![],
                         id: 0,
+                        frozen: false,
                     },
                     destination: Endpoint::Tuple(vec![PortRef::new("main"), PortRef::new("skip")]),
                 },
@@ -699,6 +700,7 @@ fn test_cycle_through_unpacked_ports() {
                         args: vec![],
                         kwargs: vec![],
                         id: 0,
+                        frozen: false,
                     },
                 },
             ],
@@ -781,8 +783,6 @@ fn test_no_cycle_valid_residual() {
         }],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![
                 Connection {
@@ -792,6 +792,7 @@ fn test_no_cycle_valid_residual() {
                         args: vec![],
                         kwargs: vec![],
                         id: 0,
+                        frozen: false,
                     },
                 },
                 Connection {
@@ -800,6 +801,7 @@ fn test_no_cycle_valid_residual() {
                         args: vec![],
                         kwargs: vec![],
                         id: 0,
+                        frozen: false,
                     },
                     destination: Endpoint::Tuple(vec![PortRef::new("main"), PortRef::new("skip")]),
                 },
@@ -810,6 +812,7 @@ fn test_no_cycle_valid_residual() {
                         args: vec![],
                         kwargs: vec![],
                         id: 0,
+                        frozen: false,
                     },
                 },
                 Connection {
@@ -818,6 +821,7 @@ fn test_no_cycle_valid_residual() {
                         args: vec![],
                         kwargs: vec![],
                         id: 0,
+                        frozen: false,
                     },
                     destination: Endpoint::Ref(PortRef::new("processed")),
                 },
@@ -828,6 +832,7 @@ fn test_no_cycle_valid_residual() {
                         args: vec![],
                         kwargs: vec![],
                         id: 0,
+                        frozen: false,
                     },
                 },
                 Connection {
@@ -836,6 +841,7 @@ fn test_no_cycle_valid_residual() {
                         args: vec![],
                         kwargs: vec![],
                         id: 0,
+                        frozen: false,
                     },
                     destination: Endpoint::Ref(PortRef::new("out")),
                 },
@@ -870,8 +876,6 @@ fn test_empty_graph() {
         }],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![],
         },
@@ -898,8 +902,6 @@ fn test_simple_passthrough() {
         }],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![Connection {
                 source: Endpoint::Ref(PortRef::new("in")),
@@ -936,8 +938,6 @@ fn test_valid_pipeline() {
         }],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![
                 Connection {
@@ -947,6 +947,7 @@ fn test_valid_pipeline() {
                         args: vec![],
                         kwargs: vec![],
                         id: 0,
+                        frozen: false,
                     },
                 },
                 Connection {
@@ -955,12 +956,14 @@ fn test_valid_pipeline() {
                         args: vec![],
                         kwargs: vec![],
                         id: 0,
+                        frozen: false,
                     },
                     destination: Endpoint::Call {
                         name: "B".to_string(),
                         args: vec![],
                         kwargs: vec![],
                         id: 0,
+                        frozen: false,
                     },
                 },
                 Connection {
@@ -969,6 +972,7 @@ fn test_valid_pipeline() {
                         args: vec![],
                         kwargs: vec![],
                         id: 0,
+                        frozen: false,
                     },
                     destination: Endpoint::Ref(PortRef::new("out")),
                 },
@@ -998,8 +1002,6 @@ fn test_match_exhaustiveness_with_catchall() {
         }],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![Connection {
                 source: Endpoint::Ref(PortRef::new("in")),
@@ -1048,8 +1050,6 @@ fn test_match_exhaustiveness_without_catchall() {
         }],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![Connection {
                 source: Endpoint::Ref(PortRef::new("in")),
@@ -1100,8 +1100,6 @@ fn test_match_pattern_shadowing() {
         }],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![Connection {
                 source: Endpoint::Ref(PortRef::new("in")),

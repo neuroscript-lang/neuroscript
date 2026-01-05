@@ -67,6 +67,7 @@ fn test_endpoint_key_unique_per_call() {
         args: vec![Value::Int(512), Value::Int(256)],
         kwargs: vec![],
         id: 0,
+        frozen: false,
     };
 
     let call2 = Endpoint::Call {
@@ -74,6 +75,7 @@ fn test_endpoint_key_unique_per_call() {
         args: vec![Value::Int(512), Value::Int(256)],
         kwargs: vec![],
         id: 1,
+        frozen: false,
     };
 
     // Different ids should produce different keys (each call gets its own module)
@@ -85,6 +87,7 @@ fn test_endpoint_key_unique_per_call() {
         args: vec![Value::Int(512), Value::Int(256)],
         kwargs: vec![],
         id: 0,
+        frozen: false,
     };
     assert_eq!(endpoint_key_impl(&call1), endpoint_key_impl(&call3));
 }

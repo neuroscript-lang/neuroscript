@@ -14,18 +14,18 @@ use std::fmt::Write;
 pub(super) fn generate_module_instantiations(
     gen: &mut CodeGenerator,
     output: &mut String,
-    let_bindings: &[Binding],
-    set_bindings: &[Binding],
+    context_bindings: &[Binding],
     connections: &[Connection],
 ) -> Result<(), CodegenError> {
-    // First, generate set: bindings (eager instantiation)
-    for binding in set_bindings {
+    let mut instantiated_count = 0;
+
+    // 1. Process unified context: bindings
+    for binding in context_bindings {
         let module_name = binding.name.clone();
         let name = &binding.call_name;
         let args = &binding.args;
         let kwargs = &binding.kwargs;
 
-        // Check if this is a primitive
         let is_primitive = if let Some(neuron) = gen.program.neurons.get(name.as_str()) {
             neuron.is_primitive()
         } else {
@@ -36,101 +36,97 @@ pub(super) fn generate_module_instantiations(
             gen.used_primitives.insert(name.clone());
         }
 
-        // Generate instantiation for set binding
-        let args_str = args
-            .iter()
-            .map(value_to_python_impl)
-            .collect::<Vec<_>>()
-            .join(", ");
+        match &binding.scope {
+            Scope::Static => {
+                // Static bindings are shared across all instances
+                // We'll use a class-level variable for this
+                // (Note: generator needs to Know class name, but currently it's not passed here)
+                // For now, let's use a simpler approach: self.__class__.name
+                let (args_str, kwargs_str) = extract_kwargs(args, kwargs);
 
-        let kwargs_str = if kwargs.is_empty() {
-            String::new()
-        } else {
-            let kw: Vec<String> = kwargs
-                .iter()
-                .map(|(k, v)| format!("{}={}", k, value_to_python_impl(v)))
-                .collect();
-            if args.is_empty() {
-                kw.join(", ")
-            } else {
-                format!(", {}", kw.join(", "))
+                writeln!(
+                    output,
+                    "        if not hasattr(self.__class__, '{}'):",
+                    module_name
+                )
+                .unwrap();
+                writeln!(
+                    output,
+                    "            self.__class__.{} = {}({}{})",
+                    module_name, name, args_str, kwargs_str
+                )
+                .unwrap();
+
+                gen.var_names.insert(
+                    module_name.clone(),
+                    format!("self.__class__.{}", module_name),
+                );
+                instantiated_count += 1;
             }
-        };
+            Scope::Instance { lazy: true } => {
+                // Lazy instance binding
+                writeln!(
+                    output,
+                    "        self._{} = None  # Lazy instantiation (@lazy)",
+                    module_name
+                )
+                .unwrap();
 
-        writeln!(
-            output,
-            "        self.{} = {}({}{})",
-            module_name, name, args_str, kwargs_str
-        )
-        .unwrap();
+                gen.lazy_bindings.insert(
+                    module_name.clone(),
+                    (name.clone(), args.clone(), kwargs.clone()),
+                );
+                gen.var_names
+                    .insert(module_name.clone(), format!("self._{}", module_name));
+                instantiated_count += 1;
+            }
+            Scope::Instance { lazy: false } => {
+                // Eager instance binding
+                let (args_str, kwargs_str) = extract_kwargs(args, kwargs);
 
-        // Register the binding name as a variable for use in graph
-        gen.var_names
-            .insert(module_name.clone(), format!("self.{}", module_name));
-    }
+                writeln!(
+                    output,
+                    "        self.{} = {}({}{})",
+                    module_name, name, args_str, kwargs_str
+                )
+                .unwrap();
 
-    // TODO: Handle let: bindings - these need lazy instantiation
-    // For now, we'll mark them for lazy instantiation
-    for binding in let_bindings {
-        let module_name = binding.name.clone();
-        let name = &binding.call_name;
-
-        // Check if this is a primitive
-        let is_primitive = if let Some(neuron) = gen.program.neurons.get(name.as_str()) {
-            neuron.is_primitive()
-        } else {
-            true // Assume primitive if not in program
-        };
-
-        if is_primitive {
-            gen.used_primitives.insert(name.clone());
+                gen.var_names
+                    .insert(module_name.clone(), format!("self.{}", module_name));
+                instantiated_count += 1;
+            }
+            Scope::Global => {
+                // This shouldn't happen due to validation, but handle it anyway
+                gen.var_names.insert(module_name.clone(), name.clone());
+            }
         }
-
-        // Initialize as None for lazy instantiation
-        writeln!(
-            output,
-            "        self._{} = None  # Lazy instantiation (let binding)",
-            binding.name
-        )
-        .unwrap();
-
-        // Store binding info for lazy instantiation in forward()
-        gen.lazy_bindings.insert(
-            module_name.clone(),
-            (name.clone(), binding.args.clone(), binding.kwargs.clone()),
-        );
-        gen.var_names
-            .insert(module_name.clone(), format!("self._{}", module_name));
     }
 
-    // Collect all unique Call endpoints and assign them IDs
+    // 3. Collect and instantiate anonymous calls from connections
     let mut seen_calls: HashMap<String, (String, String, Vec<Value>, Vec<Kwarg>)> = HashMap::new();
     let mut all_endpoints = Vec::new();
     collect_calls_impl(connections, &mut all_endpoints);
 
     for endpoint in &all_endpoints {
-        if let Endpoint::Call {
-            name, args, kwargs, ..
-        } = endpoint
-        {
+        if let Endpoint::Call { .. } = endpoint {
             let key = endpoint_key_impl(endpoint);
             if let hash_map::Entry::Vacant(e) = seen_calls.entry(key.clone()) {
                 let id = gen.next_node_id();
-                let module_name = format!("{}_{}", snake_case_impl(name), id);
-                // Store the mapping for use in forward generation
+                let name = extract_call_name(endpoint);
+                let module_name = format!("{}_{}", snake_case_impl(&name), id);
+                let args = extract_call_args(endpoint);
+                let kwargs = extract_call_kwargs(endpoint);
+
                 gen.call_to_module.insert(key.clone(), module_name.clone());
-                e.insert((name.clone(), module_name, args.clone(), kwargs.clone()));
+                e.insert((name, module_name, args, kwargs));
             }
         }
     }
 
-    // Generate instantiations in deterministic order
     let mut calls: Vec<_> = seen_calls.into_iter().collect();
-    calls.sort_by(|a, b| a.1 .1.cmp(&b.1 .1)); // Sort by module_name for determinism
+    calls.sort_by(|a, b| a.1 .1.cmp(&b.1 .1));
 
-    let mut instantiated_count = 0;
     for (_key, (name, module_name, args, kwargs)) in &calls {
-        // Check if any arguments contain captured dimensions
         let has_captured = args
             .iter()
             .any(|v| has_captured_dimensions_impl(v, &gen.current_neuron_params))
@@ -139,12 +135,9 @@ pub(super) fn generate_module_instantiations(
                 .any(|(_, v)| has_captured_dimensions_impl(v, &gen.current_neuron_params));
 
         if has_captured {
-            // Skip instantiation in __init__ for modules with captured dimensions
-            // They will be instantiated lazily in forward()
-            // Initialize cache variable to None
             writeln!(
                 output,
-                "        self._{} = None  # Lazy instantiation (has captured dimensions)",
+                "        self._{} = None  # Lazy instantiation (captured)",
                 module_name
             )
             .unwrap();
@@ -152,38 +145,15 @@ pub(super) fn generate_module_instantiations(
             continue;
         }
 
-        // Check if this is a primitive
-        let is_primitive = if let Some(neuron) = gen.program.neurons.get(name.as_str()) {
-            neuron.is_primitive()
+        if let Some(neuron) = gen.program.neurons.get(name.as_str()) {
+            if neuron.is_primitive() {
+                gen.used_primitives.insert(name.clone());
+            }
         } else {
-            // Assume it's a primitive if not in program
-            true
-        };
-
-        if is_primitive {
             gen.used_primitives.insert(name.clone());
         }
 
-        // Generate instantiation
-        let args_str = args
-            .iter()
-            .map(value_to_python_impl)
-            .collect::<Vec<_>>()
-            .join(", ");
-
-        let kwargs_str = if kwargs.is_empty() {
-            String::new()
-        } else {
-            let kw: Vec<String> = kwargs
-                .iter()
-                .map(|(k, v)| format!("{}={}", k, value_to_python_impl(v)))
-                .collect();
-            if args.is_empty() {
-                kw.join(", ")
-            } else {
-                format!(", {}", kw.join(", "))
-            }
-        };
+        let (args_str, kwargs_str) = extract_kwargs(args, kwargs);
 
         writeln!(
             output,
@@ -194,12 +164,54 @@ pub(super) fn generate_module_instantiations(
         instantiated_count += 1;
     }
 
-    // If no modules were instantiated, add pass
     if instantiated_count == 0 {
         writeln!(output, "        pass").unwrap();
     }
 
     Ok(())
+}
+
+fn extract_kwargs(args: &[Value], kwargs: &[(String, Value)]) -> (String, String) {
+    let args_str = args
+        .iter()
+        .map(value_to_python_impl)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let kwargs_str = format_kwargs_impl(kwargs);
+    (args_str, kwargs_str)
+}
+
+fn format_kwargs_impl(kwargs: &[(String, Value)]) -> String {
+    if kwargs.is_empty() {
+        String::new()
+    } else {
+        let kw: Vec<String> = kwargs
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, value_to_python_impl(v)))
+            .collect();
+        format!(", {}", kw.join(", "))
+    }
+}
+
+fn extract_call_name(endpoint: &Endpoint) -> String {
+    match endpoint {
+        Endpoint::Call { name, .. } => name.clone(),
+        _ => String::new(),
+    }
+}
+
+fn extract_call_args(endpoint: &Endpoint) -> Vec<Value> {
+    match endpoint {
+        Endpoint::Call { args, .. } => args.clone(),
+        _ => vec![],
+    }
+}
+
+fn extract_call_kwargs(endpoint: &Endpoint) -> Vec<Kwarg> {
+    match endpoint {
+        Endpoint::Call { kwargs, .. } => kwargs.clone(),
+        _ => vec![],
+    }
 }
 
 #[cfg(test)]

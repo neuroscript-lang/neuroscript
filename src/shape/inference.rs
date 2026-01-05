@@ -357,6 +357,7 @@ impl ShapeInferenceEngine {
                 args: _,
                 kwargs: _,
                 id,
+                frozen: _,
             } => {
                 // Validate call destination
                 let called_neuron = program.neurons.get(name).ok_or_else(|| {

@@ -315,7 +315,6 @@ fn test_unify_expr_with_literal() {
 #[test]
 fn test_is_dim_resolvable() {
     let mut ctx = InferenceContext::new();
-    let engine = ShapeInferenceEngine::new();
 
     // Literal is always resolvable
     assert!(is_dim_resolvable(&Dim::Literal(512), &ctx));

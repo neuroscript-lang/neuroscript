@@ -169,6 +169,7 @@ pub enum Endpoint {
         args: Vec<Value>,
         kwargs: Vec<Kwarg>,
         id: usize,
+        frozen: bool,
     },
     /// Pattern match expression
     Match(MatchExpr),
@@ -223,7 +224,8 @@ pub struct Binding {
     pub call_name: String,
     pub args: Vec<Value>,
     pub kwargs: Vec<Kwarg>,
-    pub scope: Scope, // Added scope
+    pub scope: Scope,
+    pub frozen: bool,
 }
 
 /// A module-level global definition: @global name = Value
@@ -240,8 +242,6 @@ pub enum NeuronBody {
     Primitive(ImplRef),
     /// Composite: defined by internal graph
     Graph {
-        let_bindings: Vec<Binding>, // Deprecated, kept for parsing let/set blocks
-        set_bindings: Vec<Binding>, // Deprecated, kept for parsing let/set blocks
         context_bindings: Vec<Binding>, // New unified bindings
         connections: Vec<Connection>,
     },
@@ -298,8 +298,6 @@ pub enum TokenKind {
     External,
     And,
     Or,
-    Let, // Deprecated
-    Set, // Deprecated
     Context,
 
     // Annotations

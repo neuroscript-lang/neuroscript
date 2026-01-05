@@ -372,8 +372,6 @@ impl<'a> Lexer<'a> {
             "external" => TokenKind::External,
             "and" => TokenKind::And,
             "or" => TokenKind::Or,
-            "let" => TokenKind::Let,
-            "set" => TokenKind::Set,
             "true" => TokenKind::True,
             "false" => TokenKind::False,
             _ => TokenKind::Ident(s),

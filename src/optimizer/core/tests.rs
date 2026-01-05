@@ -54,8 +54,6 @@ fn test_optimize_matches_basic() {
         outputs: vec![],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![connection],
         },
@@ -123,8 +121,6 @@ fn test_optimize_matches_shadowing() {
         outputs: vec![],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![connection],
         },
@@ -198,8 +194,6 @@ fn test_optimize_matches_guards_prevent_pruning() {
         outputs: vec![],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![connection],
         },
@@ -283,8 +277,6 @@ fn test_optimize_matches_multiple_unreachable() {
         outputs: vec![],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![connection],
         },
@@ -351,8 +343,6 @@ fn test_optimize_matches_disabled() {
         outputs: vec![],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![connection],
         },
@@ -439,8 +429,6 @@ fn test_optimize_matches_nested() {
         outputs: vec![],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![connection],
         },
@@ -509,8 +497,6 @@ fn test_count_matches() {
         outputs: vec![],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![
                 Connection {
@@ -619,8 +605,6 @@ fn test_reorder_match_arms() {
         outputs: vec![],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![connection],
         },

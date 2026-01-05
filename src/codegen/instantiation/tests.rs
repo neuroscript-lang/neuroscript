@@ -14,11 +14,12 @@ fn test_module_instantiation_simple() {
             args: vec![Value::Int(512), Value::Int(256)],
             kwargs: vec![],
             id: 0,
+            frozen: false,
         },
     }];
 
     let mut output = String::new();
-    generate_module_instantiations(&mut gen, &mut output, &[], &[], &connections).unwrap();
+    generate_module_instantiations(&mut gen, &mut output, &[], &connections).unwrap();
 
     assert!(output.contains("self.linear_0 = Linear(512, 256)"));
 }
@@ -38,6 +39,7 @@ fn test_module_deduplication() {
                 args: vec![Value::Int(512), Value::Int(256)],
                 kwargs: vec![],
                 id: 0,
+                frozen: false,
             },
         },
         Connection {
@@ -47,12 +49,13 @@ fn test_module_deduplication() {
                 args: vec![Value::Int(512), Value::Int(256)],
                 kwargs: vec![],
                 id: 0,
+                frozen: false,
             },
         },
     ];
 
     let mut output = String::new();
-    generate_module_instantiations(&mut gen, &mut output, &[], &[], &connections).unwrap();
+    generate_module_instantiations(&mut gen, &mut output, &[], &connections).unwrap();
 
     // Should only have one instantiation
     assert_eq!(output.matches("Linear(512, 256)").count(), 1);
@@ -72,11 +75,12 @@ fn test_lazy_instantiation_marker() {
             args: vec![Value::Name("d".to_string()), Value::Int(512)],
             kwargs: vec![],
             id: 0,
+            frozen: false,
         },
     }];
 
     let mut output = String::new();
-    generate_module_instantiations(&mut gen, &mut output, &[], &[], &connections).unwrap();
+    generate_module_instantiations(&mut gen, &mut output, &[], &connections).unwrap();
 
     // Should generate lazy instantiation marker
     assert!(output.contains("self._linear_0 = None"));

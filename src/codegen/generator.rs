@@ -94,8 +94,7 @@ impl<'a> CodeGenerator<'a> {
                 writeln!(output, "        pass").unwrap();
             }
             NeuronBody::Graph {
-                let_bindings,
-                set_bindings,
+                context_bindings,
                 connections,
                 ..
             } => {
@@ -103,8 +102,7 @@ impl<'a> CodeGenerator<'a> {
                 instantiation::generate_module_instantiations(
                     self,
                     output,
-                    let_bindings,
-                    set_bindings,
+                    context_bindings,
                     connections,
                 )?;
             }
@@ -177,22 +175,15 @@ fn collect_dependencies(
 
     // Only process composite neurons (primitives are just imports)
     if let NeuronBody::Graph {
-        let_bindings,
-        set_bindings,
-        context_bindings: _,
+        context_bindings,
         connections,
     } = &neuron.body
     {
         // Collect all called neuron names from bindings and connections
         let mut called_neurons = HashSet::new();
 
-        // Collect from set bindings
-        for binding in set_bindings {
-            called_neurons.insert(binding.call_name.clone());
-        }
-
-        // Collect from let bindings
-        for binding in let_bindings {
+        // Collect from context bindings
+        for binding in context_bindings {
             called_neurons.insert(binding.call_name.clone());
         }
 
@@ -261,6 +252,22 @@ pub fn generate_pytorch(program: &Program, neuron_name: &str) -> Result<String, 
     let mut dependencies = Vec::new();
     collect_dependencies(neuron_name, program, &mut visited, &mut dependencies)?;
 
+    // Generate globals
+    let mut globals_output = String::new();
+    let dummy_gen = CodeGenerator::new(program, InferenceContext::new());
+    for global in &program.globals {
+        writeln!(
+            globals_output,
+            "{} = {}",
+            global.name,
+            dummy_gen.value_to_python(&global.value)
+        )
+        .unwrap();
+    }
+    if !program.globals.is_empty() {
+        writeln!(globals_output).unwrap();
+    }
+
     // Generate code for all dependencies in order
     let mut all_code = String::new();
     let mut all_primitives = HashSet::new();
@@ -294,8 +301,8 @@ pub fn generate_pytorch(program: &Program, neuron_name: &str) -> Result<String, 
     }
     writeln!(imports_output).unwrap();
 
-    // Combine imports and all neuron code
-    Ok(format!("{}{}", imports_output, all_code))
+    // Combine imports, globals and all neuron code
+    Ok(format!("{}{}{}", imports_output, globals_output, all_code))
 }
 
 /// Run shape inference for a single neuron and return the inference context

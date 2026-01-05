@@ -18,8 +18,6 @@ fn test_codegen_match() {
         }],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![Connection {
                 source: Endpoint::Ref(PortRef::new("in")),
@@ -34,6 +32,7 @@ fn test_codegen_match() {
                                     args: vec![],
                                     kwargs: vec![],
                                     id: 0,
+                                    frozen: false,
                                 },
                                 Endpoint::Ref(PortRef::new("out")),
                             ],
@@ -48,6 +47,7 @@ fn test_codegen_match() {
                                     args: vec![Value::Int(256), Value::Int(512)],
                                     kwargs: vec![],
                                     id: 1,
+                                    frozen: false,
                                 },
                                 Endpoint::Ref(PortRef::new("out")),
                             ],
@@ -88,8 +88,6 @@ fn test_codegen_match_with_captured_dims() {
         }],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![Connection {
                 source: Endpoint::Ref(PortRef::new("in")),
@@ -108,6 +106,7 @@ fn test_codegen_match_with_captured_dims() {
                                     args: vec![Value::Name("d".to_string()), Value::Int(512)],
                                     kwargs: vec![],
                                     id: 0,
+                                    frozen: false,
                                 },
                                 Endpoint::Ref(PortRef::new("out")),
                             ],
@@ -122,12 +121,14 @@ fn test_codegen_match_with_captured_dims() {
                                     args: vec![Value::Name("d".to_string()), Value::Int(256)],
                                     kwargs: vec![],
                                     id: 1,
+                                    frozen: false,
                                 },
                                 Endpoint::Call {
                                     name: "Linear".to_string(),
                                     args: vec![Value::Int(256), Value::Int(512)],
                                     kwargs: vec![],
                                     id: 2,
+                                    frozen: false,
                                 },
                                 Endpoint::Ref(PortRef::new("out")),
                             ],
@@ -188,8 +189,6 @@ fn test_codegen_match_guards_with_bindings() {
         }],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![Connection {
                 source: Endpoint::Ref(PortRef::new("in")),
@@ -207,6 +206,7 @@ fn test_codegen_match_guards_with_bindings() {
                                 args: vec![],
                                 kwargs: vec![],
                                 id: 0,
+                                frozen: false,
                             },
                             Endpoint::Ref(PortRef::new("out")),
                         ],
@@ -251,8 +251,6 @@ fn test_codegen_optimized_match_fewer_branches() {
             }],
             max_cycle_depth: Some(10),
             body: NeuronBody::Graph {
-                let_bindings: vec![],
-                set_bindings: vec![],
                 context_bindings: vec![],
                 connections: vec![Connection {
                     source: Endpoint::Ref(PortRef::new("in")),
@@ -270,6 +268,7 @@ fn test_codegen_optimized_match_fewer_branches() {
                                         args: vec![Value::Name("d".to_string()), Value::Int(512)],
                                         kwargs: vec![],
                                         id: 0,
+                                        frozen: false,
                                     },
                                     Endpoint::Ref(PortRef::new("out")),
                                 ],
@@ -284,6 +283,7 @@ fn test_codegen_optimized_match_fewer_branches() {
                                         args: vec![],
                                         kwargs: vec![],
                                         id: 1,
+                                        frozen: false,
                                     },
                                     Endpoint::Ref(PortRef::new("out")),
                                 ],
@@ -298,6 +298,7 @@ fn test_codegen_optimized_match_fewer_branches() {
                                         args: vec![],
                                         kwargs: vec![],
                                         id: 2,
+                                        frozen: false,
                                     },
                                     Endpoint::Ref(PortRef::new("out")),
                                 ],
@@ -422,8 +423,6 @@ fn test_codegen_optimized_match_with_guards() {
         }],
         max_cycle_depth: Some(10),
         body: NeuronBody::Graph {
-            let_bindings: vec![],
-            set_bindings: vec![],
             context_bindings: vec![],
             connections: vec![Connection {
                 source: Endpoint::Ref(PortRef::new("in")),
@@ -442,6 +441,7 @@ fn test_codegen_optimized_match_with_guards() {
                                     args: vec![Value::Name("d".to_string()), Value::Int(512)],
                                     kwargs: vec![],
                                     id: 0,
+                                    frozen: false,
                                 },
                                 Endpoint::Ref(PortRef::new("out")),
                             ],
@@ -456,6 +456,7 @@ fn test_codegen_optimized_match_with_guards() {
                                     args: vec![],
                                     kwargs: vec![],
                                     id: 1,
+                                    frozen: false,
                                 },
                                 Endpoint::Ref(PortRef::new("out")),
                             ],

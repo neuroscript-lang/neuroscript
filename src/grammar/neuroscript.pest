@@ -25,8 +25,6 @@ keyword_where = @{ "where" ~ !ident_cont }
 keyword_external = @{ "external" ~ !ident_cont }
 keyword_and = @{ "and" ~ !ident_cont }
 keyword_or = @{ "or" ~ !ident_cont }
-keyword_let = @{ "let" ~ !ident_cont }
-keyword_set = @{ "set" ~ !ident_cont }
 keyword_true = @{ "true" ~ !ident_cont }
 keyword_false = @{ "false" ~ !ident_cont }
 keyword_context = @{ "context" ~ !ident_cont }
@@ -89,8 +87,8 @@ ident_cont = _{ ASCII_ALPHANUMERIC | "_" }
 keyword = _{
     keyword_neuron | keyword_use | keyword_in | keyword_out
   | keyword_impl | keyword_graph | keyword_match | keyword_where
-  | keyword_external | keyword_and | keyword_or | keyword_let
-  | keyword_set | keyword_true | keyword_false
+  | keyword_external | keyword_and | keyword_or
+  | keyword_true | keyword_false
   | keyword_context | keyword_static | keyword_global | keyword_lazy
 }
 
@@ -242,23 +240,25 @@ impl_path = {
 }
 
 // ============================================================================
-// Bindings (let/set)
+// Neuron Expressions
 // ============================================================================
 
-// let: always indented
-let_section = {
-    keyword_let ~ colon ~ NEWLINE ~ (NEWLINE* ~ binding)+
+// neuron_expr: Foo(1, 2) or Freeze(Foo(1, 2)) or Foo
+neuron_expr = {
+    (keyword_freeze ~ lparen ~ neuron_expr ~ rparen)
+  | call_expr
+  | ident
 }
 
-// set: always indented
-set_section = {
-    keyword_set ~ colon ~ NEWLINE ~ (NEWLINE* ~ binding)+
-}
+keyword_freeze = @{ "Freeze" ~ !ident_cont }
 
-// Binding: name = NeuronCall(args)
+// ============================================================================
+// Bindings
+// ============================================================================
+
 // Binding: name = NeuronCall(args)
 binding = {
-    ident ~ assign ~ call_expr
+    ident ~ assign ~ neuron_expr
 }
 
 // ============================================================================
@@ -330,7 +330,7 @@ ref_endpoint = {
 
 // Call endpoint: Linear(512, 256)
 call_endpoint = {
-    ident ~ lparen ~ call_args? ~ rparen
+    neuron_expr
 }
 
 // Tuple endpoint: (a, b, c)
@@ -367,8 +367,6 @@ neuron_section = {
   | out_section
   | context_section
   | impl_section
-  | let_section
-  | set_section
   | graph_section
 }
 
@@ -379,12 +377,23 @@ neuron_def = {
 }
 
 // ============================================================================
-// Use Statements
+// Use Statements and Global Declarations
 // ============================================================================
 
 // Use statement: use core,nn/*
 use_stmt = {
     keyword_use ~ ident ~ comma ~ impl_path
+}
+
+// Global declaration: @global vocab_table = Embedding(50257, 768)
+// Or @global num_heads = 12
+global_decl = {
+    at ~ keyword_global ~ (binding | global_value_binding)
+}
+
+// Special binding for global simple values that are NOT neurons
+global_value_binding = {
+    ident ~ assign ~ value
 }
 
 // ============================================================================
@@ -393,5 +402,5 @@ use_stmt = {
 
 // Top-level program
 program = {
-    SOI ~ NEWLINE* ~ (use_stmt ~ NEWLINE+)* ~ (neuron_def ~ NEWLINE*)* ~ EOI
+    SOI ~ NEWLINE* ~ ((use_stmt | global_decl) ~ NEWLINE+)* ~ (neuron_def ~ NEWLINE*)* ~ EOI
 }

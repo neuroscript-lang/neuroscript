@@ -65,7 +65,7 @@
 
 **summary**: Implement end-to-end validation for transformers by generating and testing a GPT-2 model
 
-## MVP Phase 7: `let`/`set` Bindings, Scopes & Recursion ⭐ KILLER FEATURE
+## MVP Phase 7: `context` Bindings, Scopes & Recursion ⭐ KILLER FEATURE
 
 **UPDATED DESIGN DECISIONS (2026-01-01):**
 

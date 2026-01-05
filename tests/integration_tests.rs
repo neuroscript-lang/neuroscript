@@ -102,8 +102,6 @@ fn format_neuron(neuron: &NeuronDef) -> String {
             output.push_str(&format!("    {}\n", format_impl_ref(impl_ref)));
         }
         NeuronBody::Graph {
-            let_bindings,
-            set_bindings,
             context_bindings,
             connections,
         } => {
@@ -122,24 +120,7 @@ fn format_neuron(neuron: &NeuronDef) -> String {
                     ));
                 }
             }
-            if !let_bindings.is_empty() {
-                output.push_str("  let:\n");
-                for binding in let_bindings {
-                    output.push_str(&format!(
-                        "    {} = {}(...)\n",
-                        binding.name, binding.call_name
-                    ));
-                }
-            }
-            if !set_bindings.is_empty() {
-                output.push_str("  set:\n");
-                for binding in set_bindings {
-                    output.push_str(&format!(
-                        "    {} = {}(...)\n",
-                        binding.name, binding.call_name
-                    ));
-                }
-            }
+
             output.push_str("  graph:\n");
             for conn in connections {
                 output.push_str(&format!("    {}\n", format_connection(conn)));
@@ -271,6 +252,7 @@ fn format_endpoint(endpoint: &Endpoint) -> String {
             args,
             kwargs,
             id,
+            frozen: _,
         } => {
             let mut result = format!("{}#{}", name, id);
             if !args.is_empty() || !kwargs.is_empty() {
