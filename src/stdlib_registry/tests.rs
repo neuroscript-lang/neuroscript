@@ -15,7 +15,7 @@ fn test_registry_basics() {
     assert!(!registry.contains("NonExistent"));
 
     // Check we have the expected number of primitives
-    assert_eq!(registry.len(), 26); // 26 primitives registered (added Reshape, Transpose, MultiHeadSelfAttention, Multiply)
+    assert_eq!(registry.len(), 27); // 27 primitives registered (added Log)
 
     // Check lookup works
     let linear = registry.lookup("Linear").unwrap();

@@ -55,6 +55,9 @@ from neuroscript_runtime.primitives.attention import (
     MultiHeadSelfAttention,
 )
 
+# Debug/Logging
+from neuroscript_runtime.primitives.logging import Log
+
 __all__ = [
     # Core Operations
     "Linear",
@@ -87,4 +90,6 @@ __all__ = [
     # Attention
     "ScaledDotProductAttention",
     "MultiHeadSelfAttention",
+    # Debug/Logging
+    "Log",
 ]
