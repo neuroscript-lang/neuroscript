@@ -44,6 +44,48 @@ enum Commands {
         bin: bool,
     },
 
+    /// Add a dependency to Axon.toml
+    Add {
+        /// Package name
+        #[arg(value_name = "PACKAGE")]
+        package: String,
+
+        /// Version requirement (e.g., "1.0", "^1.2.3")
+        #[arg(long)]
+        version: Option<String>,
+
+        /// Git repository URL
+        #[arg(long)]
+        git: Option<String>,
+
+        /// Git branch
+        #[arg(long)]
+        branch: Option<String>,
+
+        /// Git tag
+        #[arg(long)]
+        tag: Option<String>,
+
+        /// Git revision (commit hash)
+        #[arg(long)]
+        rev: Option<String>,
+
+        /// Local filesystem path
+        #[arg(long)]
+        path: Option<PathBuf>,
+    },
+
+    /// Fetch all dependencies
+    Fetch {
+        /// Show verbose output
+        #[arg(short, long)]
+        verbose: bool,
+
+        /// Update dependencies to latest compatible versions
+        #[arg(long)]
+        update: bool,
+    },
+
     /// Parse a NeuroScript file and show its structure
     Parse {
         /// Input NeuroScript file
@@ -125,6 +167,16 @@ fn main() -> miette::Result<()> {
             license,
             bin,
         } => cmd_init(name, path, version, author, license, bin),
+        Commands::Add {
+            package,
+            version,
+            git,
+            branch,
+            tag,
+            rev,
+            path,
+        } => cmd_add(package, version, git, branch, tag, rev, path),
+        Commands::Fetch { verbose, update } => cmd_fetch(verbose, update),
         Commands::Parse { file, verbose } => cmd_parse(file, verbose),
         Commands::Validate {
             file,
@@ -186,6 +238,187 @@ fn cmd_init(
             std::process::exit(1);
         }
     }
+}
+
+/// Add command: Add a dependency to Axon.toml
+fn cmd_add(
+    package: String,
+    version: Option<String>,
+    git: Option<String>,
+    branch: Option<String>,
+    tag: Option<String>,
+    rev: Option<String>,
+    path: Option<PathBuf>,
+) -> miette::Result<()> {
+    use neuroscript::package::{Dependency, DependencyDetail, Manifest};
+
+    // Find Axon.toml in current directory or parents
+    let manifest_path = Manifest::find_in_directory(".")
+        .map_err(|e| miette::miette!("No Axon.toml found in current directory or parents: {}", e))?;
+
+    // Load manifest
+    let mut manifest = Manifest::from_path(&manifest_path)
+        .into_diagnostic()
+        .wrap_err("Failed to load Axon.toml")?;
+
+    // Create dependency specification
+    let dep = if let Some(git_url) = git {
+        Dependency::Detailed(DependencyDetail {
+            version: version.clone(),
+            git: Some(git_url),
+            branch,
+            tag,
+            rev,
+            path: None,
+            optional: false,
+        })
+    } else if let Some(local_path) = path {
+        Dependency::Detailed(DependencyDetail {
+            version: None,
+            git: None,
+            branch: None,
+            tag: None,
+            rev: None,
+            path: Some(local_path),
+            optional: false,
+        })
+    } else if let Some(ver) = version {
+        Dependency::Simple(ver)
+    } else {
+        // Default to latest version
+        Dependency::Simple("*".to_string())
+    };
+
+    // Add to manifest
+    manifest.dependencies.insert(package.clone(), dep);
+
+    // Save manifest
+    let toml_string = toml::to_string_pretty(&manifest)
+        .into_diagnostic()
+        .wrap_err("Failed to serialize manifest")?;
+
+    fs::write(&manifest_path, toml_string)
+        .into_diagnostic()
+        .wrap_err("Failed to write Axon.toml")?;
+
+    println!("✓ Added dependency: {}", package);
+    println!("  Updated: {}", manifest_path.display());
+    println!("\nRun `neuroscript fetch` to download dependencies");
+
+    Ok(())
+}
+
+/// Fetch command: Fetch all dependencies
+fn cmd_fetch(verbose: bool, update: bool) -> miette::Result<()> {
+    use neuroscript::package::{Lockfile, Manifest, Registry};
+
+    // Find Axon.toml
+    let manifest_path = Manifest::find_in_directory(".")
+        .map_err(|e| miette::miette!("No Axon.toml found in current directory or parents: {}", e))?;
+
+    let manifest_dir = manifest_path
+        .parent()
+        .ok_or_else(|| miette::miette!("Invalid manifest path"))?;
+
+    // Load manifest
+    let manifest = Manifest::from_path(&manifest_path)
+        .into_diagnostic()
+        .wrap_err("Failed to load Axon.toml")?;
+
+    if verbose {
+        println!("Loading manifest from {}", manifest_path.display());
+        println!("Package: {} v{}", manifest.package.name, manifest.package.version);
+    }
+
+    // Check if we have dependencies
+    if manifest.dependencies.is_empty() {
+        println!("No dependencies to fetch");
+        return Ok(());
+    }
+
+    // Initialize registry
+    let registry = Registry::new()
+        .into_diagnostic()
+        .wrap_err("Failed to initialize registry")?;
+
+    registry
+        .init()
+        .into_diagnostic()
+        .wrap_err("Failed to initialize cache")?;
+
+    if verbose {
+        let cache_dir = Registry::default_cache_dir()
+            .into_diagnostic()
+            .wrap_err("Failed to get cache directory")?;
+        println!("Cache directory: {}", cache_dir.display());
+    }
+
+    // Check lockfile
+    let lockfile_path = manifest_dir.join("Axon.lock");
+    let needs_update = if lockfile_path.exists() && !update {
+        let lockfile = Lockfile::from_path(&lockfile_path)
+            .into_diagnostic()
+            .wrap_err("Failed to load Axon.lock")?;
+
+        if lockfile.is_up_to_date(&manifest) {
+            if verbose {
+                println!("Lockfile is up-to-date, using existing resolutions");
+            }
+            false
+        } else {
+            if verbose {
+                println!("Lockfile is outdated, resolving dependencies");
+            }
+            true
+        }
+    } else {
+        true
+    };
+
+    // Fetch dependencies
+    println!("Fetching {} dependencies...", manifest.dependencies.len());
+
+    let fetched = registry
+        .fetch_dependencies(&manifest)
+        .into_diagnostic()
+        .wrap_err("Failed to fetch dependencies")?;
+
+    for (name, path) in &fetched {
+        println!("  ✓ {} -> {}", name, path.display());
+    }
+
+    // Generate/update lockfile if needed
+    if needs_update {
+        // For now, create a simple lockfile with fetched dependencies
+        // Full resolution will be implemented when we have a registry
+        let mut lockfile = Lockfile::new();
+
+        for (name, path) in &fetched {
+            // Load the dependency's manifest to get version
+            let dep_manifest_path = path.join("Axon.toml");
+            if let Ok(dep_manifest) = Manifest::from_path(dep_manifest_path) {
+                let locked = neuroscript::package::LockedPackage::from_path(
+                    name.clone(),
+                    dep_manifest.package.version.clone(),
+                    path.clone(),
+                );
+                lockfile.add_package(locked);
+            }
+        }
+
+        lockfile
+            .save(&lockfile_path)
+            .into_diagnostic()
+            .wrap_err("Failed to save Axon.lock")?;
+
+        if verbose {
+            println!("\n✓ Generated Axon.lock");
+        }
+    }
+
+    println!("\n✓ All dependencies fetched successfully");
+
+    Ok(())
 }
 
 /// Parse command: Read and display the IR structure

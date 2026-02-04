@@ -3,11 +3,18 @@
 //! This module provides infrastructure for working with NeuroScript packages:
 //! - Manifest parsing (Axon.toml)
 //! - Package initialization
-//! - Dependency resolution (future)
-//! - Registry interaction (future)
+//! - Lockfile management (Axon.lock)
+//! - Dependency resolution
+//! - Registry interaction and caching
 
 pub mod init;
+pub mod lockfile;
 pub mod manifest;
+pub mod registry;
+pub mod resolver;
 
 pub use init::{init_package, InitError, InitOptions};
-pub use manifest::{Dependency, Manifest, ManifestError, PackageMetadata};
+pub use lockfile::{Lockfile, LockfileError, LockedPackage, PackageSource};
+pub use manifest::{Dependency, DependencyDetail, Manifest, ManifestError, PackageMetadata};
+pub use registry::{Registry, RegistryError};
+pub use resolver::{AvailablePackage, Resolver, ResolverError};
