@@ -24,8 +24,8 @@ neuron TransformerBlock(dim, num_heads):
         (ffn_out, ffn_skip) -> Add() -> out
 
 neuron FFN(dim):
-    in: [*, seq, dim]
-    out: [*, seq, dim]
+    in: [*shape, dim]
+    out: [*shape, dim]
     graph:
         in ->
             Linear(dim, dim * 4)
@@ -39,13 +39,13 @@ neuron MultiHeadSelfAttention(dim, num_heads):
     impl: core,attention/MultiHeadSelfAttention
 
 neuron Linear(in_dim, out_dim):
-    in: [*, in_dim]
-    out: [*, out_dim]
+    in: [*shape, in_dim]
+    out: [*shape, out_dim]
     impl: core,nn/Linear
 
 neuron LayerNorm(dim):
-    in: [*, dim]
-    out: [*, dim]
+    in: [*shape, dim]
+    out: [*shape, dim]
     impl: core,normalization/LayerNorm
 
 neuron GELU:

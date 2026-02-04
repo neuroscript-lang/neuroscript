@@ -4,8 +4,8 @@
 
 # Example 1: Basic Linear layer (primitive)
 neuron Linear(in_dim, out_dim):
-    in: [*, in_dim]
-    out: [*, out_dim]
+    in: [*shape, in_dim]
+    out: [*shape, out_dim]
     impl: core,nn/Linear
 
 # Example 2: Simple projection layer

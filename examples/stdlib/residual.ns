@@ -69,8 +69,8 @@ neuron MLP(dim):
             out
 
 neuron Linear(in_dim, out_dim):
-    in: [*, in_dim]
-    out: [*, out_dim]
+    in: [*shape, in_dim]
+    out: [*shape, out_dim]
     impl: core,nn/Linear
 
 neuron GELU:
@@ -91,6 +91,6 @@ neuron Add:
     impl: core,builtin/Add
 
 neuron LayerNorm(dim):
-    in: [*, dim]
-    out: [*, dim]
+    in: [*shape, dim]
+    out: [*shape, dim]
     impl: core,normalization/LayerNorm

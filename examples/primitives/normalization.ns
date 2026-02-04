@@ -4,32 +4,32 @@
 
 # Example 1: LayerNorm - Layer Normalization
 neuron LayerNorm(dim):
-    in: [*, dim]
-    out: [*, dim]
+    in: [*shape, dim]
+    out: [*shape, dim]
     impl: core,normalization/LayerNorm
 
 # Example 2: BatchNorm - Batch Normalization
 neuron BatchNorm(dim):
-    in: [*, dim]
-    out: [*, dim]
+    in: [*shape, dim]
+    out: [*shape, dim]
     impl: core,normalization/BatchNorm
 
 # Example 3: GroupNorm - Group Normalization
 neuron GroupNorm(num_groups, dim):
-    in: [*, dim]
-    out: [*, dim]
+    in: [*shape, dim]
+    out: [*shape, dim]
     impl: core,normalization/GroupNorm
 
 # Example 4: InstanceNorm - Instance Normalization
 neuron InstanceNorm(dim):
-    in: [*, dim]
-    out: [*, dim]
+    in: [*shape, dim]
+    out: [*shape, dim]
     impl: core,normalization/InstanceNorm
 
 # Example 5: RMSNorm - Root Mean Square Normalization
 neuron RMSNorm(dim):
-    in: [*, dim]
-    out: [*, dim]
+    in: [*shape, dim]
+    out: [*shape, dim]
     impl: core,normalization/RMSNorm
 
 # Example 6: Pre-norm transformer pattern (LayerNorm before attention)
@@ -91,8 +91,8 @@ neuron GroupNormBlock(channels, num_groups):
 
 # Supporting primitives
 neuron Linear(in_dim, out_dim):
-    in: [*, in_dim]
-    out: [*, out_dim]
+    in: [*shape, in_dim]
+    out: [*shape, out_dim]
     impl: core,nn/Linear
 
 neuron Conv2d(in_channels, out_channels, kernel_size, padding):

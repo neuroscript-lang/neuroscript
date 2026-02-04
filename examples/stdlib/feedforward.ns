@@ -4,8 +4,8 @@
 
 # Example 1: Basic FFN (expand-activate-contract)
 neuron FFN(dim):
-    in: [*, seq, dim]
-    out: [*, seq, dim]
+    in: [*shape, dim]
+    out: [*shape, dim]
     graph:
         in ->
             Linear(dim, dim * 4)
@@ -15,8 +15,8 @@ neuron FFN(dim):
 
 # Example 2: FFN with explicit hidden dimension
 neuron FFNWithHidden(in_dim, hidden_dim, out_dim):
-    in: [*, seq, in_dim]
-    out: [*, seq, out_dim]
+    in: [*shape, in_dim]
+    out: [*shape, out_dim]
     graph:
         in ->
             Linear(in_dim, hidden_dim)
@@ -26,8 +26,8 @@ neuron FFNWithHidden(in_dim, hidden_dim, out_dim):
 
 # Example 3: FFN with dropout (for training)
 neuron FFNWithDropout(dim, dropout_rate):
-    in: [*, seq, dim]
-    out: [*, seq, dim]
+    in: [*shape, dim]
+    out: [*shape, dim]
     graph:
         in ->
             Linear(dim, dim * 4)
@@ -39,8 +39,8 @@ neuron FFNWithDropout(dim, dropout_rate):
 
 # Example 4: Gated FFN (SwiGLU-style)
 neuron GatedFFN(dim):
-    in: [*, seq, dim]
-    out: [*, seq, dim]
+    in: [*shape, dim]
+    out: [*shape, dim]
     graph:
         in -> Fork() -> (gate_path, value_path)
 
@@ -57,8 +57,8 @@ neuron GatedFFN(dim):
 
 # Example 5: FFN in transformer block context
 neuron TransformerFFNBlock(dim):
-    in: [*, seq, dim]
-    out: [*, seq, dim]
+    in: [*shape, dim]
+    out: [*shape, dim]
     graph:
         in -> Fork() -> (main, skip)
         main ->
@@ -69,8 +69,8 @@ neuron TransformerFFNBlock(dim):
 
 # Example 6: Adaptive FFN (adjust expansion based on dimension)
 neuron AdaptiveFFN:
-    in: [*, seq, dim]
-    out: [*, seq, dim]
+    in: [*shape, dim]
+    out: [*shape, dim]
     graph:
         in -> match:
             # Small models: larger expansion
@@ -83,8 +83,8 @@ neuron AdaptiveFFN:
 
 # Supporting primitives
 neuron Linear(in_dim, out_dim):
-    in: [*, in_dim]
-    out: [*, out_dim]
+    in: [*shape, in_dim]
+    out: [*shape, out_dim]
     impl: core,nn/Linear
 
 neuron GELU:
@@ -121,6 +121,6 @@ neuron Add:
     impl: core,builtin/Add
 
 neuron LayerNorm(dim):
-    in: [*, dim]
-    out: [*, dim]
+    in: [*shape, dim]
+    out: [*shape, dim]
     impl: core,normalization/LayerNorm

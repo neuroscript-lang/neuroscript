@@ -61,13 +61,13 @@ neuron VisionTransformer(img_size, patch_size, num_classes, dim, depth, num_head
 
 # Supporting primitives
 neuron Linear(in_dim, out_dim):
-    in: [*, in_dim]
-    out: [*, out_dim]
+    in: [*shape, in_dim]
+    out: [*shape, out_dim]
     impl: core,nn/Linear
 
 neuron LayerNorm(dim):
-    in: [*, dim]
-    out: [*, dim]
+    in: [*shape, dim]
+    out: [*shape, dim]
     impl: core,normalization/LayerNorm
 
 neuron MultiHeadSelfAttention(dim, num_heads):

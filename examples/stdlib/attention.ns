@@ -22,8 +22,8 @@ neuron MultiHeadSelfAttention(dim, num_heads):
     impl: core,attention/MultiHeadSelfAttention
 
 neuron LayerNorm(dim):
-    in: [*, dim]
-    out: [*, dim]
+    in: [*shape, dim]
+    out: [*shape, dim]
     impl: core,normalization/LayerNorm
 
 neuron Fork:

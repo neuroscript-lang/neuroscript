@@ -1,0 +1,81 @@
+# Test: Variadic Wildcards for Multi-Rank Tensors
+# Purpose: Verify Linear and LayerNorm work with rank-2, rank-3, and rank-4 tensors
+
+# Primitives with variadic wildcards
+neuron Linear(in_dim, out_dim):
+    in: [*shape, in_dim]
+    out: [*shape, out_dim]
+    impl: core,nn/Linear
+
+neuron LayerNorm(dim):
+    in: [*shape, dim]
+    out: [*shape, dim]
+    impl: core,normalization/LayerNorm
+
+# Test 1: Rank-2 tensors (existing behavior - should still work)
+neuron Test2D_Linear:
+    in: [batch, dim]
+    out: [batch, out_dim]
+    graph:
+        in -> Linear(dim=768, out_dim=512) -> out
+
+neuron Test2D_LayerNorm:
+    in: [batch, dim]
+    out: [batch, dim]
+    graph:
+        in -> LayerNorm(dim=768) -> out
+
+# Test 2: Rank-3 tensors (new behavior - GPT-2 style)
+neuron Test3D_Linear:
+    in: [batch, seq, dim]
+    out: [batch, seq, out_dim]
+    graph:
+        in -> Linear(dim=768, out_dim=512) -> out
+
+neuron Test3D_LayerNorm:
+    in: [batch, seq, dim]
+    out: [batch, seq, dim]
+    graph:
+        in -> LayerNorm(dim=768) -> out
+
+neuron Test3D_Pipeline:
+    in: [batch, seq, dim]
+    out: [batch, seq, vocab_size]
+    graph:
+        in ->
+            LayerNorm(dim=768)
+            Linear(dim=768, out_dim=50257)
+            out
+
+# Test 3: Rank-4 tensors (multi-head attention style)
+neuron Test4D_Linear:
+    in: [batch, heads, seq, dim]
+    out: [batch, heads, seq, out_dim]
+    graph:
+        in -> Linear(dim=64, out_dim=64) -> out
+
+neuron Test4D_LayerNorm:
+    in: [batch, heads, seq, dim]
+    out: [batch, heads, seq, dim]
+    graph:
+        in -> LayerNorm(dim=64) -> out
+
+# Test 4: Mixed ranks in pipeline
+neuron TestMixedRanks:
+    in: [batch, seq, dim]
+    out: [batch, seq, out_dim]
+    graph:
+        in ->
+            LayerNorm(dim=768)
+            Linear(dim=768, out_dim=3072)
+            GELU()
+            Linear(dim=3072, out_dim=768)
+            LayerNorm(dim=768)
+            Linear(dim=768, out_dim=512)
+            out
+
+# Supporting primitives
+neuron GELU:
+    in: [*shape]
+    out: [*shape]
+    impl: core,activations/GELU
