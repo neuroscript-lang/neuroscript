@@ -17,6 +17,33 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Initialize a new NeuroScript package
+    Init {
+        /// Package name
+        #[arg(value_name = "NAME")]
+        name: String,
+
+        /// Create in this directory (defaults to NAME)
+        #[arg(long, value_name = "PATH")]
+        path: Option<PathBuf>,
+
+        /// Package version
+        #[arg(long, default_value = "0.1.0")]
+        version: String,
+
+        /// Author name and email
+        #[arg(long)]
+        author: Option<String>,
+
+        /// License
+        #[arg(long, default_value = "MIT")]
+        license: String,
+
+        /// Create a binary package (with examples)
+        #[arg(long)]
+        bin: bool,
+    },
+
     /// Parse a NeuroScript file and show its structure
     Parse {
         /// Input NeuroScript file
@@ -90,6 +117,14 @@ fn main() -> miette::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Init {
+            name,
+            path,
+            version,
+            author,
+            license,
+            bin,
+        } => cmd_init(name, path, version, author, license, bin),
         Commands::Parse { file, verbose } => cmd_parse(file, verbose),
         Commands::Validate {
             file,
@@ -114,6 +149,42 @@ fn main() -> miette::Result<()> {
             no_stdlib,
         ),
         Commands::List { file, verbose } => cmd_list(file, verbose),
+    }
+}
+
+/// Init command: Create a new NeuroScript package
+fn cmd_init(
+    name: String,
+    path: Option<PathBuf>,
+    version: String,
+    author: Option<String>,
+    license: String,
+    bin: bool,
+) -> miette::Result<()> {
+    use neuroscript::package::{init_package, InitOptions};
+
+    let options = InitOptions {
+        name: name.clone(),
+        path,
+        version,
+        author,
+        license: Some(license),
+        bin,
+    };
+
+    match init_package(&options) {
+        Ok(package_dir) => {
+            println!("✓ Created new package '{}' at {}", name, package_dir.display());
+            println!("\nNext steps:");
+            println!("  cd {}", package_dir.display());
+            println!("  # Edit src/*.ns with your neuron definitions");
+            println!("  neuroscript build");
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("✗ Failed to initialize package: {}", e);
+            std::process::exit(1);
+        }
     }
 }
 

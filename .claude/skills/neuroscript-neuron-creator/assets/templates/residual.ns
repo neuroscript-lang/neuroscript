@@ -1,0 +1,19 @@
+# Residual Connection Template
+# Replace placeholders with actual values
+
+neuron {{NeuronName}}({{dim}}):
+    in: [*, {{dim}}]
+    out: [*, {{dim}}]
+    graph:
+        # Fork into main path and skip connection
+        in -> Fork() -> (main, skip)
+
+        # Main transformation path
+        main ->
+            {{Layer1}}({{dim}}, {{hidden_dim}})
+            {{Activation}}()
+            {{Layer2}}({{hidden_dim}}, {{dim}})
+            processed
+
+        # Combine with residual
+        (processed, skip) -> Add() -> out

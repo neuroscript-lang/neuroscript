@@ -23,6 +23,8 @@ pest = "2.7"           # PEG parser generator
 pest_derive = "2.7"    # Derive macro for pest
 serde = { version = "1.0", features = ["derive"] }  # Serialization
 serde_json = "1.0"     # JSON serialization for WASM API
+toml = "0.8"           # TOML parsing for Axon.toml
+semver = "1.0"         # Semantic versioning
 
 [dev-dependencies]
 pretty_assertions = "1.4"

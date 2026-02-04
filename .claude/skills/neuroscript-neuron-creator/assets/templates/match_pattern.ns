@@ -1,0 +1,21 @@
+# Match Pattern Template
+# Replace placeholders with actual values
+
+neuron {{NeuronName}}({{out_dim}}):
+    in: [{{batch}}, {{in_dim}}]
+    out: [{{batch}}, {{out_dim}}]
+    graph:
+        in -> match:
+            # Pattern with guard - captures dimension 'd'
+            [{{batch}}, d] where d > {{threshold1}}:
+                {{Layer1}}(d, {{intermediate}}) ->
+                {{Layer2}}({{intermediate}}, {{out_dim}})
+
+            # Another pattern with different threshold
+            [{{batch}}, d] where d > {{threshold2}}:
+                {{Layer1}}(d, {{out_dim}})
+
+            # Catch-all pattern (must be exhaustive)
+            [{{batch}}, d]:
+                {{Layer1}}(d, {{out_dim}})
+        -> out
