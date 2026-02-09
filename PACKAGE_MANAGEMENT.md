@@ -195,7 +195,65 @@ name = "double--hyphen"      # No consecutive hyphens
 
 ## Future Phases
 
-### Phase 4: Registry & Advanced Features (Planned)
+### Phase 4: Dependency Loading & Stdlib as Package (Planned)
+
+The goal is for the entire stdlib to be distributed as a package, and for `use` statements to resolve to actual neuron definitions from fetched dependencies.
+
+#### `neuroscript fetch` — Load Fetched Neurons into Compilation
+
+Currently `fetch` clones/resolves dependencies to disk and generates `Axon.lock`, but the compiler doesn't load neurons from those packages. This phase bridges that gap:
+
+- After fetching, walk each dependency's `src/*.ns` files and parse them
+- Merge fetched neuron definitions into the compiler's symbol table alongside local neurons
+- Resolve `use` statements against fetched packages (e.g., `use attention-blocks,MultiHeadAttention` finds `MultiHeadAttention` in the `attention-blocks` dependency's `.ns` files)
+- Wildcard imports (`use pkg,nn/*`) resolve to all neurons from that package/namespace
+- Validate that imported neuron names don't conflict with local definitions
+- Transitive dependency loading: if package A depends on package B, B's neurons are available to A's definitions
+- Error clearly when a `use` references a package not declared in `Axon.toml` or a neuron not exported by that package
+
+This enables the stdlib itself to become a package — the compiler would fetch `neuroscript-stdlib` as a dependency rather than bundling it internally.
+
+#### `neuroscript list --stdlib` — List Available Neurons
+
+Add a `--stdlib` flag (and broader `--available` variant) to the `list` command so users can discover what neurons exist without reading source files:
+
+```bash
+# List all stdlib neurons (primitives + composites)
+neuroscript list --stdlib
+
+# List with details (signatures, shapes, categories)
+neuroscript list --stdlib --verbose
+
+# List neurons from a specific fetched dependency
+neuroscript list --package attention-blocks
+
+# List all available neurons (stdlib + all fetched dependencies)
+neuroscript list --available
+
+# Filter by category
+neuroscript list --stdlib --category activations
+```
+
+Output format:
+```
+Primitives (53):
+  Linear(in_dim, out_dim)          [*shape, in_dim] -> [*shape, out_dim]
+  GELU()                           [*shape] -> [*shape]
+  LayerNorm(dim)                   [*shape, dim] -> [*shape, dim]
+  ...
+
+Composites (10):
+  FFN(dim, expansion)              [*shape, dim] -> [*shape, dim]
+  TransformerBlock(dim, heads, ff)  [batch, seq, dim] -> [batch, seq, dim]
+  ...
+```
+
+This reads neuron definitions from:
+1. The stdlib registry (`StdlibRegistry`) for primitives
+2. The stdlib `.ns` files for composites
+3. Fetched dependency packages (their `Axon.toml` `neurons` list and parsed `.ns` files)
+
+### Phase 5: Registry & Advanced Features (Planned)
 
 - Central registry server (Rust web service)
 - `neuroscript audit` (vulnerability database)
