@@ -29,6 +29,9 @@ pub enum RegistryError {
 
     #[error("Cache directory not found")]
     CacheNotFound,
+
+    #[error("Security verification failed for package '{name}': {reason}")]
+    SecurityVerificationFailed { name: String, reason: String },
 }
 
 /// Package registry and cache manager
@@ -139,6 +142,40 @@ impl Registry {
                 "Package name mismatch: expected '{}', found '{}'",
                 name, manifest.package.name
             )));
+        }
+
+        // Verify security checksums if present
+        if let Some(security) = &manifest.security {
+            if !security.checksums.is_empty() {
+                match crate::package::security::verify_package(&checkout_dir, security) {
+                    Ok(report) => {
+                        if !report.checksums_valid {
+                            return Err(RegistryError::SecurityVerificationFailed {
+                                name: name.to_string(),
+                                reason: format!(
+                                    "Checksum mismatch for files: {}",
+                                    report.failed_files.join(", ")
+                                ),
+                            });
+                        }
+                        if let Some(false) = report.signature_valid {
+                            eprintln!(
+                                "Warning: Signature verification failed for package '{}'",
+                                name
+                            );
+                        }
+                        if report.signature_valid == Some(true) {
+                            println!("  ✓ Signature verified for '{}'", name);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Warning: Could not verify package '{}': {}",
+                            name, e
+                        );
+                    }
+                }
+            }
         }
 
         Ok(checkout_dir)

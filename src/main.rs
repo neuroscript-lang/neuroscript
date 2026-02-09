@@ -153,6 +153,43 @@ enum Commands {
         #[arg(short, long)]
         verbose: bool,
     },
+
+    /// Generate an Ed25519 keypair for package signing
+    Keygen {
+        /// Key name (used for file naming: ~/.neuroscript/keys/{name}.key)
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
+
+    /// Sign and prepare a package for distribution
+    Publish {
+        /// Package directory (defaults to current directory)
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
+
+        /// Path to signing key file
+        #[arg(long, value_name = "FILE")]
+        key: Option<PathBuf>,
+
+        /// Skip signing (only compute checksums)
+        #[arg(long)]
+        no_sign: bool,
+
+        /// Show detailed output
+        #[arg(short, long)]
+        verbose: bool,
+    },
+
+    /// Verify package checksums and signature
+    Verify {
+        /// Package directory (defaults to current directory)
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
+
+        /// Show detailed output
+        #[arg(short, long)]
+        verbose: bool,
+    },
 }
 
 fn main() -> miette::Result<()> {
@@ -201,6 +238,14 @@ fn main() -> miette::Result<()> {
             no_stdlib,
         ),
         Commands::List { file, verbose } => cmd_list(file, verbose),
+        Commands::Keygen { name } => cmd_keygen(name),
+        Commands::Publish {
+            path,
+            key,
+            no_sign,
+            verbose,
+        } => cmd_publish(path, key, no_sign, verbose),
+        Commands::Verify { path, verbose } => cmd_verify(path, verbose),
     }
 }
 
@@ -697,6 +742,238 @@ fn cmd_list(file: PathBuf, verbose: bool) -> miette::Result<()> {
     }
 
     Ok(())
+}
+
+/// Keygen command: Generate an Ed25519 keypair for package signing
+fn cmd_keygen(name: String) -> miette::Result<()> {
+    use neuroscript::package::security;
+
+    let (signing_key, verifying_key) = security::generate_keypair();
+
+    let (key_path, pub_path) = security::save_keypair(&name, &signing_key)
+        .map_err(|e| miette::miette!("Failed to save keypair: {}", e))?;
+
+    let pub_key_str = security::format_publisher_key(&verifying_key);
+
+    println!("✓ Generated Ed25519 keypair '{}'", name);
+    println!("  Private key: {}", key_path.display());
+    println!("  Public key:  {}", pub_path.display());
+    println!("\n  Publisher key for Axon.toml:");
+    println!("  {}", pub_key_str);
+
+    Ok(())
+}
+
+/// Publish command: Sign and prepare a package for distribution
+fn cmd_publish(
+    path: Option<PathBuf>,
+    key: Option<PathBuf>,
+    no_sign: bool,
+    verbose: bool,
+) -> miette::Result<()> {
+    use neuroscript::package::{security, Manifest};
+
+    let package_dir = path.unwrap_or_else(|| PathBuf::from("."));
+    let manifest_path = package_dir.join("Axon.toml");
+
+    if !manifest_path.exists() {
+        return Err(miette::miette!(
+            "No Axon.toml found in {}",
+            package_dir.display()
+        ));
+    }
+
+    let manifest = Manifest::from_path(&manifest_path)
+        .into_diagnostic()
+        .wrap_err("Failed to load Axon.toml")?;
+
+    if verbose {
+        println!(
+            "Publishing {} v{}",
+            manifest.package.name, manifest.package.version
+        );
+    }
+
+    // Compute file checksums
+    let checksums = security::compute_checksums(&package_dir)
+        .map_err(|e| miette::miette!("Failed to compute checksums: {}", e))?;
+
+    if checksums.is_empty() {
+        return Err(miette::miette!(
+            "No .ns files found in package directory"
+        ));
+    }
+
+    if verbose {
+        println!("  Computed checksums for {} files", checksums.len());
+        for (path, hash) in &checksums {
+            println!("    {} {}", &hash[..15], path);
+        }
+    }
+
+    // Compute overall checksum
+    let overall = security::compute_overall_checksum(&checksums);
+
+    if verbose {
+        println!("  Overall checksum: {}", &overall[..22]);
+    }
+
+    // Sign if requested
+    let (signature, publisher_key) = if no_sign {
+        if verbose {
+            println!("  Skipping signature (--no-sign)");
+        }
+        (None, None)
+    } else {
+        // Find signing key
+        let key_path = if let Some(k) = key {
+            k
+        } else {
+            // Auto-discover key for this package
+            match security::discover_signing_key(&manifest.package.name)
+                .map_err(|e| miette::miette!("Failed to discover signing key: {}", e))?
+            {
+                Some(p) => p,
+                None => {
+                    eprintln!(
+                        "Warning: No signing key found for '{}'. Use --key or run `neuroscript keygen {}`",
+                        manifest.package.name, manifest.package.name
+                    );
+                    eprintln!("  Publishing without signature (checksums only)");
+                    return finish_publish(&manifest_path, checksums, overall, None, None, verbose);
+                }
+            }
+        };
+
+        if verbose {
+            println!("  Signing with key: {}", key_path.display());
+        }
+
+        let signing_key = security::load_signing_key(&key_path)
+            .map_err(|e| miette::miette!("Failed to load signing key: {}", e))?;
+
+        let sig = security::sign_checksum(&overall, &signing_key);
+        let pub_key = security::format_publisher_key(&signing_key.verifying_key());
+
+        (Some(sig), Some(pub_key))
+    };
+
+    finish_publish(
+        &manifest_path,
+        checksums,
+        overall,
+        signature,
+        publisher_key,
+        verbose,
+    )
+}
+
+fn finish_publish(
+    manifest_path: &Path,
+    checksums: std::collections::BTreeMap<String, String>,
+    overall: String,
+    signature: Option<String>,
+    publisher_key: Option<String>,
+    verbose: bool,
+) -> miette::Result<()> {
+    use neuroscript::package::{manifest::Security, security};
+
+    let sec = Security {
+        publisher_key,
+        signature,
+        checksum: Some(overall),
+        checksums,
+    };
+
+    security::update_manifest_security(manifest_path, sec)
+        .map_err(|e| miette::miette!("Failed to update Axon.toml: {}", e))?;
+
+    if verbose {
+        println!("  Updated: {}", manifest_path.display());
+    }
+
+    println!("✓ Package prepared for distribution");
+    println!("  Axon.toml updated with checksums and signature");
+
+    Ok(())
+}
+
+/// Verify command: Verify package checksums and signature
+fn cmd_verify(path: Option<PathBuf>, verbose: bool) -> miette::Result<()> {
+    use neuroscript::package::{security, Manifest};
+
+    let package_dir = path.unwrap_or_else(|| PathBuf::from("."));
+    let manifest_path = package_dir.join("Axon.toml");
+
+    if !manifest_path.exists() {
+        return Err(miette::miette!(
+            "No Axon.toml found in {}",
+            package_dir.display()
+        ));
+    }
+
+    let manifest = Manifest::from_path(&manifest_path)
+        .into_diagnostic()
+        .wrap_err("Failed to load Axon.toml")?;
+
+    let security = manifest.security.as_ref().ok_or_else(|| {
+        miette::miette!("No [security] section in Axon.toml — run `neuroscript publish` first")
+    })?;
+
+    if verbose {
+        println!(
+            "Verifying {} v{}",
+            manifest.package.name, manifest.package.version
+        );
+    }
+
+    let report = security::verify_package(&package_dir, security)
+        .map_err(|e| miette::miette!("Verification failed: {}", e))?;
+
+    // Print results
+    if report.checksums_valid {
+        println!("✓ File checksums: all {} files verified", security.checksums.len());
+    } else {
+        println!("✗ File checksums: FAILED");
+        for f in &report.failed_files {
+            println!("    Modified: {}", f);
+        }
+    }
+
+    for f in &report.missing_files {
+        println!("    Missing: {}", f);
+    }
+    for f in &report.extra_files {
+        if verbose {
+            println!("    New file: {}", f);
+        }
+    }
+
+    if report.overall_checksum_valid {
+        println!("✓ Overall checksum: valid");
+    } else {
+        println!("✗ Overall checksum: MISMATCH");
+    }
+
+    match report.signature_valid {
+        Some(true) => println!("✓ Signature: valid"),
+        Some(false) => println!("✗ Signature: INVALID"),
+        None => {
+            if security.signature.is_some() {
+                println!("? Signature: could not verify (missing publisher key)");
+            } else {
+                println!("- Signature: not present");
+            }
+        }
+    }
+
+    if report.is_valid() {
+        println!("\n✓ Package verification passed");
+        Ok(())
+    } else {
+        eprintln!("\n✗ Package verification FAILED");
+        std::process::exit(1);
+    }
 }
 
 // ============================================================================

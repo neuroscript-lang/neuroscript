@@ -3,7 +3,7 @@
 //! Defines the structure of Axon.toml files and provides parsing logic.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -127,18 +127,22 @@ pub struct PythonRuntime {
 /// Security metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Security {
-    /// Publisher's public key fingerprint
+    /// Publisher's public key fingerprint (ED25519:<hex>)
     #[serde(rename = "publisher-key")]
     #[serde(default)]
     pub publisher_key: Option<String>,
 
-    /// Overall package checksum
+    /// Package signature (ED25519:<hex>)
+    #[serde(default)]
+    pub signature: Option<String>,
+
+    /// Overall package checksum (sha256:<hex>)
     #[serde(default)]
     pub checksum: Option<String>,
 
-    /// Per-file checksums
+    /// Per-file checksums (BTreeMap for deterministic serialization)
     #[serde(default)]
-    pub checksums: HashMap<String, String>,
+    pub checksums: BTreeMap<String, String>,
 }
 
 impl Manifest {
@@ -315,27 +319,27 @@ mod tests {
     #[test]
     fn test_parse_full_manifest() {
         let toml = r#"
-            [package]
-            name = "attention-mechanisms"
-            version = "0.1.0"
-            authors = ["Test Author <test@example.com>"]
-            license = "MIT"
-            description = "Self-attention neurons"
-            repository = "https://github.com/user/attention"
+neurons = ["MultiHeadAttention", "ScaledDotProduct"]
 
-            neurons = ["MultiHeadAttention", "ScaledDotProduct"]
+[package]
+name = "attention-mechanisms"
+version = "0.1.0"
+authors = ["Test Author <test@example.com>"]
+license = "MIT"
+description = "Self-attention neurons"
+repository = "https://github.com/user/attention"
 
-            [dependencies]
-            core-primitives = "1.2.0"
-            residual-blocks = { version = "0.3", git = "https://github.com/org/residual" }
-            local-dev = { path = "../local-dev" }
+[dependencies]
+core-primitives = "1.2.0"
+residual-blocks = { version = "0.3", git = "https://github.com/org/residual" }
+local-dev = { path = "../local-dev" }
 
-            [python-runtime]
-            requires = ["torch>=2.0", "einops>=0.6"]
+[python-runtime]
+requires = ["torch>=2.0", "einops>=0.6"]
 
-            [security]
-            publisher-key = "ED25519:abc123"
-            checksum = "sha256:def456"
+[security]
+publisher-key = "ED25519:abc123"
+checksum = "sha256:def456"
         "#;
 
         let manifest = Manifest::from_str(toml).unwrap();

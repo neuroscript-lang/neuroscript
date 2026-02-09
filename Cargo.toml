@@ -28,6 +28,9 @@ semver = "1.0"         # Semantic versioning
 git2 = "0.18"          # Git operations for dependency fetching
 sha2 = "0.10"          # SHA-256 checksums
 dirs = "5.0"           # Cross-platform directory paths
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }  # Ed25519 signing
+rand = "0.8"           # Cryptographic random number generation
+hex = "0.4"            # Hex encoding for keys and signatures
 
 [dev-dependencies]
 pretty_assertions = "1.4"
