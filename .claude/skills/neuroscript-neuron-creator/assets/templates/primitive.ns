@@ -1,7 +1,0 @@
-# Primitive Neuron Template
-# Replace placeholders with actual values
-
-neuron {{NeuronName}}({{param1}}, {{param2}}):
-    in: [{{input_shape}}]
-    out: [{{output_shape}}]
-    impl: {{provider}},{{library}}/{{ClassName}}
