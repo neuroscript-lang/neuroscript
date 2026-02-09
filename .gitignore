@@ -53,6 +53,7 @@ Icon[
 Network Trash Folder
 Temporary Items
 .apdisk
+.history
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
