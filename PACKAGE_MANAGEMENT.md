@@ -80,7 +80,7 @@ checksum = "sha256:93cd5af901067..."
 
 A typical NeuroScript package has this structure:
 
-```
+```txt
 my-package/
 ├── Axon.toml              # Package manifest
 ├── README.md              # Package documentation
@@ -92,7 +92,7 @@ my-package/
 
 With `--bin` flag:
 
-```
+```txt
 my-package/
 ├── Axon.toml
 ├── README.md
@@ -107,11 +107,12 @@ my-package/
 
 ### Module Structure
 
-```
+```txt
 src/package/
 ├── mod.rs         # Module declarations and re-exports
 ├── manifest.rs    # Axon.toml parsing and validation
 ├── init.rs        # Package initialization logic
+├── loader.rs      # Dependency loading, use-stmt resolution, merge
 ├── lockfile.rs    # Axon.lock generation and management
 ├── registry.rs    # Git/path dependency fetching and cache
 ├── resolver.rs    # Dependency resolution
@@ -193,65 +194,43 @@ name = "-starts-with-hyphen" # No leading hyphen
 name = "double--hyphen"      # No consecutive hyphens
 ```
 
+### Phase 4: Dependency Loading & `list --stdlib` ✅ (Complete)
+
+- Dependency loading from `Axon.lock`: parses `src/*.ns` files from fetched packages
+- Export filtering by `Axon.toml` `neurons` list (empty = all exported)
+- Neuron name conflict detection between packages
+- `use` statement validation against loaded packages
+- Merge precedence: dependencies → stdlib → user (user wins)
+- `--no-deps` flag for `validate` and `compile` commands
+- Auto-discovery of `Axon.lock` by walking up from input file
+- `neuroscript list --stdlib` — lists all primitives + stdlib composites
+- `neuroscript list --package <NAME>` — lists neurons from a fetched dependency
+- `neuroscript list --available` — lists everything (stdlib + all deps)
+- Transitive dependency loading via topological sort of `Axon.lock`
+- `UseError` validation error variant for import failures
+
+New module: `src/package/loader.rs` with key types:
+
+- `LoadedPackage` — parsed package with exported neuron definitions
+- `DependencyContext` — all loaded packages with lookup index
+- `LoadError` — error enum for all dependency loading failures
+
+Key functions:
+
+- `load_package(name, path)` → parse a single package
+- `load_dependencies(lockfile_path)` → load all deps in topological order
+- `resolve_use_stmt(use_stmt, deps)` → resolve imports to neuron names
+- `validate_use_stmts(program, deps)` → check all `use` statements
+- `merge_all(deps, stdlib, user)` → merge with correct precedence
+
+CLI changes:
+
+- `validate` and `compile` auto-load deps from `Axon.lock` if present
+- `--no-deps` flag to skip dependency loading
+- `list` command expanded with `--stdlib`, `--package`, `--available` flags
+- `list` file argument is now optional when using `--stdlib`/`--available`
+
 ## Future Phases
-
-### Phase 4: Dependency Loading & Stdlib as Package (Planned)
-
-The goal is for the entire stdlib to be distributed as a package, and for `use` statements to resolve to actual neuron definitions from fetched dependencies.
-
-#### `neuroscript fetch` — Load Fetched Neurons into Compilation
-
-Currently `fetch` clones/resolves dependencies to disk and generates `Axon.lock`, but the compiler doesn't load neurons from those packages. This phase bridges that gap:
-
-- After fetching, walk each dependency's `src/*.ns` files and parse them
-- Merge fetched neuron definitions into the compiler's symbol table alongside local neurons
-- Resolve `use` statements against fetched packages (e.g., `use attention-blocks,MultiHeadAttention` finds `MultiHeadAttention` in the `attention-blocks` dependency's `.ns` files)
-- Wildcard imports (`use pkg,nn/*`) resolve to all neurons from that package/namespace
-- Validate that imported neuron names don't conflict with local definitions
-- Transitive dependency loading: if package A depends on package B, B's neurons are available to A's definitions
-- Error clearly when a `use` references a package not declared in `Axon.toml` or a neuron not exported by that package
-
-This enables the stdlib itself to become a package — the compiler would fetch `neuroscript-stdlib` as a dependency rather than bundling it internally.
-
-#### `neuroscript list --stdlib` — List Available Neurons
-
-Add a `--stdlib` flag (and broader `--available` variant) to the `list` command so users can discover what neurons exist without reading source files:
-
-```bash
-# List all stdlib neurons (primitives + composites)
-neuroscript list --stdlib
-
-# List with details (signatures, shapes, categories)
-neuroscript list --stdlib --verbose
-
-# List neurons from a specific fetched dependency
-neuroscript list --package attention-blocks
-
-# List all available neurons (stdlib + all fetched dependencies)
-neuroscript list --available
-
-# Filter by category
-neuroscript list --stdlib --category activations
-```
-
-Output format:
-```
-Primitives (53):
-  Linear(in_dim, out_dim)          [*shape, in_dim] -> [*shape, out_dim]
-  GELU()                           [*shape] -> [*shape]
-  LayerNorm(dim)                   [*shape, dim] -> [*shape, dim]
-  ...
-
-Composites (10):
-  FFN(dim, expansion)              [*shape, dim] -> [*shape, dim]
-  TransformerBlock(dim, heads, ff)  [batch, seq, dim] -> [batch, seq, dim]
-  ...
-```
-
-This reads neuron definitions from:
-1. The stdlib registry (`StdlibRegistry`) for primitives
-2. The stdlib `.ns` files for composites
-3. Fetched dependency packages (their `Axon.toml` `neurons` list and parsed `.ns` files)
 
 ### Phase 5: Registry & Advanced Features (Planned)
 

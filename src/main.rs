@@ -2,7 +2,8 @@
 
 use clap::{Parser, Subcommand};
 use miette::{IntoDiagnostic, NamedSource, WrapErr};
-use neuroscript::{generate_pytorch, parse, stdlib, validate, NeuronBody};
+use neuroscript::package::{self, DependencyContext};
+use neuroscript::{generate_pytorch, parse, stdlib, validate, NeuronBody, StdlibRegistry};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -110,6 +111,10 @@ enum Commands {
         /// Skip loading standard library
         #[arg(long)]
         no_stdlib: bool,
+
+        /// Skip loading fetched dependencies
+        #[arg(long)]
+        no_deps: bool,
     },
 
     /// Compile NeuroScript to PyTorch
@@ -141,17 +146,33 @@ enum Commands {
         /// Skip loading standard library
         #[arg(long)]
         no_stdlib: bool,
+
+        /// Skip loading fetched dependencies
+        #[arg(long)]
+        no_deps: bool,
     },
 
-    /// List all neurons in a file
+    /// List all neurons in a file, stdlib, or fetched packages
     List {
         /// Input NeuroScript file
         #[arg(value_name = "FILE")]
-        file: PathBuf,
+        file: Option<PathBuf>,
 
         /// Show additional details (connections, match expressions)
         #[arg(short, long)]
         verbose: bool,
+
+        /// List all stdlib neurons (primitives + composites)
+        #[arg(long)]
+        stdlib: bool,
+
+        /// List neurons from a specific fetched dependency
+        #[arg(long, value_name = "NAME")]
+        package: Option<String>,
+
+        /// List all available neurons (stdlib + all fetched deps)
+        #[arg(long)]
+        available: bool,
     },
 
     /// Generate an Ed25519 keypair for package signing
@@ -219,7 +240,8 @@ fn main() -> miette::Result<()> {
             file,
             verbose,
             no_stdlib,
-        } => cmd_validate(file, verbose, no_stdlib),
+            no_deps,
+        } => cmd_validate(file, verbose, no_stdlib, no_deps),
         Commands::Compile {
             file,
             neuron,
@@ -228,6 +250,7 @@ fn main() -> miette::Result<()> {
             no_dead_elim,
             verbose,
             no_stdlib,
+            no_deps,
         } => cmd_compile(
             file,
             neuron,
@@ -236,8 +259,15 @@ fn main() -> miette::Result<()> {
             no_dead_elim,
             verbose,
             no_stdlib,
+            no_deps,
         ),
-        Commands::List { file, verbose } => cmd_list(file, verbose),
+        Commands::List {
+            file,
+            verbose,
+            stdlib: list_stdlib,
+            package: list_package,
+            available,
+        } => cmd_list(file, verbose, list_stdlib, list_package, available),
         Commands::Keygen { name } => cmd_keygen(name),
         Commands::Publish {
             path,
@@ -498,37 +528,61 @@ fn cmd_parse(file: PathBuf, verbose: bool) -> miette::Result<()> {
 }
 
 /// Validate command: Parse and validate the program
-fn cmd_validate(file: PathBuf, verbose: bool, no_stdlib: bool) -> miette::Result<()> {
+fn cmd_validate(file: PathBuf, verbose: bool, no_stdlib: bool, no_deps: bool) -> miette::Result<()> {
     let source = read_source(&file)?;
     let user_program = parse(&source).map_err(|e| {
         let source_named = NamedSource::new(file.to_string_lossy(), source);
         miette::Report::from(e).with_source_code(source_named)
     })?;
 
+    // Try to load dependencies
+    let dep_ctx = if no_deps {
+        if verbose {
+            println!("Skipping dependency loading (--no-deps)");
+        }
+        None
+    } else {
+        try_load_dependencies(&file, verbose)
+    };
+
     // Load and merge stdlib if not disabled
-    let mut program = if no_stdlib {
+    let stdlib_program = if no_stdlib {
         if verbose {
             println!("Skipping stdlib loading (--no-stdlib)");
         }
-        user_program
+        None
     } else {
         if verbose {
             println!("Loading standard library...");
         }
         match stdlib::load_stdlib() {
-            Ok(stdlib_program) => {
+            Ok(stdlib_prog) => {
                 if verbose {
-                    println!("✓ Loaded {} stdlib neurons", stdlib_program.neurons.len());
+                    println!("✓ Loaded {} stdlib neurons", stdlib_prog.neurons.len());
                 }
-                stdlib::merge_programs(stdlib_program, user_program)
+                Some(stdlib_prog)
             }
             Err(e) => {
                 eprintln!("Warning: Failed to load stdlib: {}", e);
                 eprintln!("Continuing without stdlib...");
-                user_program
+                None
             }
         }
     };
+
+    // Validate use statements against loaded deps
+    if let Some(ref ctx) = dep_ctx {
+        let use_errors = package::validate_use_stmts(&user_program, ctx);
+        for err in &use_errors {
+            eprintln!("Warning: {}", err);
+        }
+    }
+
+    // Merge: deps -> stdlib -> user
+    let empty_stdlib = neuroscript::Program::new();
+    let stdlib_prog = stdlib_program.unwrap_or(empty_stdlib);
+    let mut program = package::merge_with_deps(dep_ctx.as_ref(), stdlib_prog, user_program)
+        .map_err(|e| miette::miette!("Dependency merge error: {}", e))?;
 
     if verbose {
         println!(
@@ -570,6 +624,7 @@ fn cmd_compile(
     no_dead_elim: bool,
     verbose: bool,
     no_stdlib: bool,
+    no_deps: bool,
 ) -> miette::Result<()> {
     let source = read_source(&file)?;
     let user_program = parse(&source).map_err(|e| {
@@ -577,30 +632,54 @@ fn cmd_compile(
         miette::Report::from(e).with_source_code(source_named)
     })?;
 
-    // Load and merge stdlib if not disabled
-    let mut program = if no_stdlib {
+    // Try to load dependencies
+    let dep_ctx = if no_deps {
+        if verbose {
+            println!("Skipping dependency loading (--no-deps)");
+        }
+        None
+    } else {
+        try_load_dependencies(&file, verbose)
+    };
+
+    // Load stdlib if not disabled
+    let stdlib_program = if no_stdlib {
         if verbose {
             println!("Skipping stdlib loading (--no-stdlib)");
         }
-        user_program
+        None
     } else {
         if verbose {
             println!("Loading standard library...");
         }
         match stdlib::load_stdlib() {
-            Ok(stdlib_program) => {
+            Ok(stdlib_prog) => {
                 if verbose {
-                    println!("✓ Loaded {} stdlib neurons", stdlib_program.neurons.len());
+                    println!("✓ Loaded {} stdlib neurons", stdlib_prog.neurons.len());
                 }
-                stdlib::merge_programs(stdlib_program, user_program)
+                Some(stdlib_prog)
             }
             Err(e) => {
                 eprintln!("Warning: Failed to load stdlib: {}", e);
                 eprintln!("Continuing without stdlib...");
-                user_program
+                None
             }
         }
     };
+
+    // Validate use statements against loaded deps
+    if let Some(ref ctx) = dep_ctx {
+        let use_errors = package::validate_use_stmts(&user_program, ctx);
+        for err in &use_errors {
+            eprintln!("Warning: {}", err);
+        }
+    }
+
+    // Merge: deps -> stdlib -> user
+    let empty_stdlib = neuroscript::Program::new();
+    let stdlib_prog = stdlib_program.unwrap_or(empty_stdlib);
+    let mut program = package::merge_with_deps(dep_ctx.as_ref(), stdlib_prog, user_program)
+        .map_err(|e| miette::miette!("Dependency merge error: {}", e))?;
 
     if verbose {
         println!(
@@ -686,7 +765,57 @@ fn cmd_compile(
 }
 
 /// List command: Show all neurons and their signatures
-fn cmd_list(file: PathBuf, verbose: bool) -> miette::Result<()> {
+fn cmd_list(
+    file: Option<PathBuf>,
+    verbose: bool,
+    list_stdlib: bool,
+    list_package: Option<String>,
+    available: bool,
+) -> miette::Result<()> {
+    // Handle --stdlib flag
+    if list_stdlib || available {
+        list_stdlib_neurons(verbose)?;
+    }
+
+    // Handle --package flag
+    if let Some(ref pkg_name) = list_package {
+        list_package_neurons(pkg_name, verbose)?;
+    }
+
+    // Handle --available flag: also list all dep neurons
+    if available {
+        if let Some(dep_ctx) = try_load_dependencies_from_cwd(verbose) {
+            for pkg in &dep_ctx.packages {
+                println!(
+                    "Package '{}' v{} ({} neurons):\n",
+                    pkg.name,
+                    pkg.version,
+                    pkg.exported_neurons.len()
+                );
+                print_neuron_map(&pkg.exported_neurons, verbose);
+            }
+        }
+    }
+
+    // If --stdlib, --package, or --available was provided without a file, we're done
+    if list_stdlib || list_package.is_some() || available {
+        if file.is_none() {
+            return Ok(());
+        }
+    }
+
+    // Require a file if no special flags were provided
+    let file = match file {
+        Some(f) => f,
+        None => {
+            if !list_stdlib && list_package.is_none() && !available {
+                eprintln!("Error: a file argument is required unless --stdlib, --package, or --available is used");
+                std::process::exit(1);
+            }
+            return Ok(());
+        }
+    };
+
     let source = read_source(&file)?;
     let program = parse(&source).map_err(|e| {
         let source_named = NamedSource::new(file.to_string_lossy(), source);
@@ -742,6 +871,116 @@ fn cmd_list(file: PathBuf, verbose: bool) -> miette::Result<()> {
     }
 
     Ok(())
+}
+
+/// List all stdlib neurons (primitives from registry + composites from .ns files)
+fn list_stdlib_neurons(verbose: bool) -> miette::Result<()> {
+    let registry = StdlibRegistry::new();
+    let primitive_names = registry.primitives();
+
+    println!("Primitives ({}):\n", primitive_names.len());
+    for name in &primitive_names {
+        if verbose {
+            if let Some(impl_ref) = registry.lookup(name) {
+                println!("  {} (impl: {})", name, impl_ref.full_name());
+            } else {
+                println!("  {}", name);
+            }
+        } else {
+            println!("  {}", name);
+        }
+    }
+
+    // Load stdlib composites
+    println!();
+    match stdlib::load_stdlib() {
+        Ok(stdlib_program) => {
+            let mut composite_names: Vec<&String> = stdlib_program.neurons.keys().collect();
+            composite_names.sort();
+
+            println!("Composites ({}):\n", composite_names.len());
+            for name in &composite_names {
+                let neuron = &stdlib_program.neurons[*name];
+                let inputs: Vec<String> = neuron
+                    .inputs
+                    .iter()
+                    .map(|p| format!("{}: {}", p.name, p.shape))
+                    .collect();
+                let outputs: Vec<String> = neuron
+                    .outputs
+                    .iter()
+                    .map(|p| format!("{}: {}", p.name, p.shape))
+                    .collect();
+
+                if verbose {
+                    println!("  {}", name);
+                    println!("    in:  {}", inputs.join(", "));
+                    println!("    out: {}", outputs.join(", "));
+                } else {
+                    println!("  {}", name);
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("Warning: Could not load stdlib composites: {}", e);
+        }
+    }
+
+    println!();
+    Ok(())
+}
+
+/// List neurons from a specific fetched dependency package
+fn list_package_neurons(pkg_name: &str, verbose: bool) -> miette::Result<()> {
+    let dep_ctx = try_load_dependencies_from_cwd(verbose)
+        .ok_or_else(|| miette::miette!("No Axon.lock found — run `neuroscript fetch` first"))?;
+
+    let pkg = dep_ctx
+        .get_package(pkg_name)
+        .ok_or_else(|| miette::miette!("Package '{}' not found in dependencies", pkg_name))?;
+
+    println!(
+        "Package '{}' v{} ({} neurons):\n",
+        pkg.name,
+        pkg.version,
+        pkg.exported_neurons.len()
+    );
+    print_neuron_map(&pkg.exported_neurons, verbose);
+
+    Ok(())
+}
+
+/// Print a map of neurons in a consistent format
+fn print_neuron_map(neurons: &std::collections::HashMap<String, neuroscript::NeuronDef>, verbose: bool) {
+    let mut names: Vec<&String> = neurons.keys().collect();
+    names.sort();
+
+    for name in names {
+        let neuron = &neurons[name];
+        let kind = match &neuron.body {
+            NeuronBody::Primitive(_) => "primitive",
+            NeuronBody::Graph { .. } => "composite",
+        };
+
+        let inputs: Vec<String> = neuron
+            .inputs
+            .iter()
+            .map(|p| format!("{}: {}", p.name, p.shape))
+            .collect();
+
+        let outputs: Vec<String> = neuron
+            .outputs
+            .iter()
+            .map(|p| format!("{}: {}", p.name, p.shape))
+            .collect();
+
+        println!("  {} ({})", name, kind);
+        if verbose {
+            println!("    in:  {}", inputs.join(", "));
+            println!("    out: {}", outputs.join(", "));
+        }
+    }
+    println!();
 }
 
 /// Keygen command: Generate an Ed25519 keypair for package signing
@@ -974,6 +1213,66 @@ fn cmd_verify(path: Option<PathBuf>, verbose: bool) -> miette::Result<()> {
         eprintln!("\n✗ Package verification FAILED");
         std::process::exit(1);
     }
+}
+
+// ============================================================================
+// Dependency Loading Helpers
+// ============================================================================
+
+/// Walk up from the given file's directory to find an Axon.lock file
+fn find_lockfile(start: &Path) -> Option<PathBuf> {
+    let start_dir = if start.is_file() {
+        start.parent().unwrap_or(Path::new("."))
+    } else {
+        start
+    };
+
+    let mut current = start_dir.to_path_buf();
+    loop {
+        let lockfile = current.join("Axon.lock");
+        if lockfile.exists() {
+            return Some(lockfile);
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
+}
+
+/// Try to load dependencies from an Axon.lock found near the given file.
+/// Returns None if no lockfile is found or loading fails (non-fatal).
+fn try_load_dependencies(file: &Path, verbose: bool) -> Option<DependencyContext> {
+    let lockfile_path = find_lockfile(file)?;
+
+    if verbose {
+        println!("Found lockfile: {}", lockfile_path.display());
+    }
+
+    match package::load_dependencies(&lockfile_path) {
+        Ok(ctx) => {
+            if verbose {
+                let total_neurons: usize = ctx.packages.iter().map(|p| p.exported_neurons.len()).sum();
+                println!(
+                    "✓ Loaded {} packages ({} neurons) from dependencies",
+                    ctx.packages.len(),
+                    total_neurons
+                );
+            }
+            Some(ctx)
+        }
+        Err(e) => {
+            if verbose {
+                eprintln!("Warning: Failed to load dependencies: {}", e);
+            }
+            None
+        }
+    }
+}
+
+/// Try to load dependencies from the current working directory
+fn try_load_dependencies_from_cwd(verbose: bool) -> Option<DependencyContext> {
+    let cwd = std::env::current_dir().ok()?;
+    try_load_dependencies(&cwd, verbose)
 }
 
 // ============================================================================

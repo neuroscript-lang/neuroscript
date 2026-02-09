@@ -128,6 +128,10 @@ const config = {
                 to: '/docs/stdlib',
               },
               {
+                label: 'Packages',
+                to: '/docs/packages',
+              },
+              {
                 label: 'Playground',
                 to: '/playground',
               },
