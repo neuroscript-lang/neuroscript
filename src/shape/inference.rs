@@ -468,40 +468,34 @@ impl ShapeInferenceEngine {
             }
 
             Endpoint::Tuple(refs) => {
-                // Validate tuple unpacking
-                if source_shapes.len() != refs.len() {
-                    return Err(ShapeError::Mismatch {
-                        expected: Shape::new(vec![]),
-                        got: Shape::new(vec![]),
-                        context: format!(
-                            "Tuple unpacking arity mismatch: source produces {} output(s), but {} binding(s) provided. Connection: {} -> ({})",
+                if source_shapes.len() == 1 && refs.len() > 1 {
+                    // Implicit fork: replicate single shape to all bindings
+                    let shape = &source_shapes[0];
+                    for (i, port_ref) in refs.iter().enumerate() {
+                        validate_tuple_port_ref(port_ref, i)?;
+                        ctx.node_outputs
+                            .insert(port_ref.node.clone(), vec![shape.clone()]);
+                    }
+                } else if source_shapes.len() != refs.len() {
+                    return Err(ShapeError::ConstraintViolation {
+                        message: format!(
+                            "Tuple unpacking arity mismatch: source produces {} output(s), but {} binding(s) provided",
                             source_shapes.len(),
                             refs.len(),
+                        ),
+                        context: format!(
+                            "Connection: {} -> ({})",
                             self.format_endpoint(&conn.source),
                             refs.iter().map(|r| r.node.as_str()).collect::<Vec<_>>().join(", ")
-                        )
+                        ),
                     });
-                }
-
-                // Assign each shape to its binding
-                for (i, (shape, port_ref)) in source_shapes.iter().zip(refs.iter()).enumerate() {
-                    // Validate the port reference is valid
-                    if port_ref.port != "default" {
-                        return Err(ShapeError::ConstraintViolation {
-                            message: format!(
-                                "Cannot use port access in tuple unpacking position {}",
-                                i
-                            ),
-                            context: format!(
-                                "Tuple binding {} should be a simple name, not {}",
-                                i,
-                                format_port_ref(port_ref)
-                            ),
-                        });
+                } else {
+                    // Standard 1:1 tuple unpacking
+                    for (i, (shape, port_ref)) in source_shapes.iter().zip(refs.iter()).enumerate() {
+                        validate_tuple_port_ref(port_ref, i)?;
+                        ctx.node_outputs
+                            .insert(port_ref.node.clone(), vec![shape.clone()]);
                     }
-
-                    ctx.node_outputs
-                        .insert(port_ref.node.clone(), vec![shape.clone()]);
                 }
             }
 
@@ -1121,6 +1115,24 @@ fn resolve_match_endpoint(
             "Nested if expressions not yet supported in match pipeline".to_string(),
         )),
     }
+}
+
+/// Validate that a tuple binding uses a simple name (no port access like `node.port`)
+fn validate_tuple_port_ref(port_ref: &PortRef, position: usize) -> Result<(), ShapeError> {
+    if port_ref.port != "default" {
+        return Err(ShapeError::ConstraintViolation {
+            message: format!(
+                "Cannot use port access in tuple unpacking position {}",
+                position
+            ),
+            context: format!(
+                "Tuple binding {} should be a simple name, not {}",
+                position,
+                format_port_ref(port_ref)
+            ),
+        });
+    }
+    Ok(())
 }
 
 fn format_port_ref(r: &PortRef) -> String {
