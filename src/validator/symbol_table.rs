@@ -58,9 +58,11 @@ where
     let mut table = SymbolTable::new();
 
     // Add input ports as nodes
-    // - If only one input and it's named "default", add as "in"
-    // - If only one input and it's variadic, add as "in" (variadic carries whole tuple)
-    // - Otherwise, add each named input port as a separate node
+    // - Single unnamed ("default") port → register as "in"
+    // - Single variadic port → register as "in" (carries whole tuple; validation
+    //   in core.rs guarantees variadic ports always have an explicit name != "default",
+    //   so the two branches here are mutually exclusive)
+    // - Otherwise, register each named port separately
     if neuron.inputs.len() == 1
         && (neuron.inputs[0].name == "default" || neuron.inputs[0].variadic)
     {
@@ -423,7 +425,10 @@ pub(super) fn check_port_compatibility(
     }
     */
 
-    // Variadic input port: accept any number of source ports
+    // Variadic input port: accept any number of source ports.
+    // This check must precede the implicit fork check below, because a tuple
+    // source like (a, b, c) flowing into a variadic neuron should match here
+    // (N→1 variadic), not fall through to the arity mismatch path.
     if dest_ports.len() == 1 && dest_ports[0].variadic {
         // Validate each source port's shape against the variadic port's shape individually
         for src_port in source_ports {

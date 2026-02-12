@@ -342,6 +342,6 @@ fn test_variadic_port_requires_explicit_name() {
         .build();
 
     assert_validation_error(&mut program, |e| {
-        matches!(e, ValidationError::Custom(msg) if msg.contains("explicit name"))
+        matches!(e, ValidationError::Custom(msg) if msg.contains("needs an explicit name"))
     });
 }
