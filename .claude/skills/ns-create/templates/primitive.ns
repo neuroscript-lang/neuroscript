@@ -1,0 +1,25 @@
+# Template: Primitive Neuron
+# A primitive neuron wraps an external Python/PyTorch implementation.
+# Replace placeholders (<...>) with actual values.
+
+/// <Brief description of what this neuron does>
+///
+/// Parameters:
+///   <param1>: <description>
+///   <param2>: <description>
+///
+/// Shape: [*, <in_dim>] -> [*, <out_dim>]
+neuron <NeuronName>(<param1>, <param2>):
+  in: [*, <in_dim>]
+  out: [*, <out_dim>]
+  impl: core,<category>/<ClassName>
+
+# Multi-port variant:
+#
+# neuron <NeuronName>(<params>):
+#   in:
+#     <port1>: [<shape1>]
+#     <port2>: [<shape2>]
+#   out:
+#     <port1>: [<shape1>]
+#   impl: core,<category>/<ClassName>

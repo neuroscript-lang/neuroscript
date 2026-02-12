@@ -41,22 +41,7 @@
           {
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/scripts/hooks/session_context.sh",
-            "timeout": 15
-          },
-          {
-            "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/scripts/hooks/init.sh"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/scripts/hooks/inject-datetime.sh",
-            "statusMessage": "Timestamping prompt..."
+            "timeout": 30
           }
         ]
       }
@@ -67,6 +52,11 @@
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/hooks/log-response-time.sh"
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/scripts/hooks/session_reflection.sh",
+            "timeout": 10
           }
         ]
       }

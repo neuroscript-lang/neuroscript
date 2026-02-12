@@ -2,6 +2,18 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Auto-Generated Context
+
+See `.claude/context/` for generated reference files (auto-regenerated at session start):
+- `ir-types-summary.md` — Core IR data types (enums, structs, type aliases)
+- `recent-changes.md` — Recent git activity and diff stats
+- `source-index.md` — Function/type catalog with line numbers
+- `call-graph.md` — Caller/callee cross-references
+- `project-status.md` — Phase, language gaps, stdlib progress
+- `architecture.md` — Mermaid diagrams (pipeline, types, module deps)
+
+Read these before exploring the codebase. Regenerate manually: `./scripts/generate-context.sh`
+
 ## Progress & Known Issues
 
 See [docs/PROGRESS.md](docs/PROGRESS.md) for session-by-session progress, known bugs, key decisions, and exploration findings that reduce future ramp-up time.

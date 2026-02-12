@@ -1,0 +1,30 @@
+# Template: Composite Neuron
+# A composite neuron connects existing neurons in a pipeline graph.
+# Replace placeholders (<...>) with actual values.
+
+/// <Brief description>
+///
+/// Parameters:
+///   <dim>: feature dimension
+///
+/// Shape: [*, <dim>] -> [*, <dim>]
+neuron <NeuronName>(<dim>):
+  in: [*, <dim>]
+  out: [*, <dim>]
+  graph:
+    in ->
+      Linear(<dim>, <dim> * 4)
+      GELU()
+      Linear(<dim> * 4, <dim>)
+      out
+
+# With context bindings:
+#
+# neuron <NeuronName>(<dim>):
+#   in: [*, <dim>]
+#   out: [*, <dim>]
+#   context:
+#     @static norm = LayerNorm(<dim>)
+#     @static ffn = FFN(<dim>, <dim> * 4)
+#   graph:
+#     in -> norm -> ffn -> out

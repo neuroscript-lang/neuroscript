@@ -1,0 +1,37 @@
+# Template: Residual Connection Neuron
+# Uses Fork to split, processes one path, then Add to recombine.
+# Replace placeholders (<...>) with actual values.
+
+/// <Brief description>
+///
+/// Implements a residual (skip) connection:
+///   output = process(input) + input
+///
+/// Parameters:
+///   <dim>: feature dimension
+///
+/// Shape: [*, <dim>] -> [*, <dim>]
+neuron <ResidualName>(<dim>):
+  in: [*, <dim>]
+  out: [*, <dim>]
+  graph:
+    in -> Fork() -> (main, skip)
+    main ->
+      LayerNorm(<dim>)
+      Linear(<dim>, <dim>)
+      GELU()
+      processed
+    (processed, skip) -> Add() -> out
+
+# Pre-norm transformer residual pattern:
+#
+# neuron PreNormResidual(<dim>, <heads>):
+#   in: [batch, seq, <dim>]
+#   out: [batch, seq, <dim>]
+#   context:
+#     @static norm = LayerNorm(<dim>)
+#     @static attn = MultiHeadSelfAttention(<dim>, <heads>)
+#   graph:
+#     in -> Fork() -> (main, skip)
+#     main -> norm -> attn -> processed
+#     (processed, skip) -> Add() -> out

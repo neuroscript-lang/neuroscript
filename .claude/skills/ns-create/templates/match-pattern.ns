@@ -1,0 +1,41 @@
+# Template: Match-Based Neuron
+# Routes input through different pipelines based on tensor shape.
+# Replace placeholders (<...>) with actual values.
+
+/// <Brief description>
+///
+/// Dispatches based on input dimension:
+///   - Large dims (>512): compress
+///   - Small dims: project up
+///   - Default: identity
+///
+/// Shape: [*, d] -> [*, <target_dim>]
+neuron <AdaptiveName>(<target_dim>):
+  in: [*, <target_dim>]
+  out: [*, <target_dim>]
+  graph:
+    in -> match:
+      [*, d] where d > 512:
+        Linear(d, <target_dim>)
+        out
+      [*, d] where d < <target_dim>:
+        Linear(d, <target_dim>)
+        GELU()
+        out
+      [*, d]:
+        Identity()
+        out
+
+# With normalization variant:
+#
+# neuron AdaptiveNorm:
+#   in: [batch, seq, dim]
+#   out: [batch, seq, dim]
+#   graph:
+#     in -> match:
+#       [b, s, d] where d <= 512:
+#         LayerNorm(d) -> out
+#       [b, s, d] where d > 512 and d <= 2048:
+#         RMSNorm(d) -> out
+#       [b, s, d]:
+#         GroupNorm(d, 8) -> out

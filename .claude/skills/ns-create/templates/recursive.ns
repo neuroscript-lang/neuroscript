@@ -1,0 +1,49 @@
+# Template: Recursive Neuron
+# Uses @lazy binding for self-reference with decreasing depth parameter.
+# Replace placeholders (<...>) with actual values.
+
+/// <Brief description>
+///
+/// Recursively applies processing layers, controlled by depth parameter.
+/// Each recursion decreases depth by 1; base case at depth=0 is identity.
+///
+/// Parameters:
+///   <dim>: feature dimension
+///   depth: number of recursive layers (must be >= 0)
+///
+/// Shape: [*, <dim>] -> [*, <dim>]
+neuron <RecursiveName>(<dim>, depth):
+  in: [*, <dim>]
+  out: [*, <dim>]
+  context:
+    @lazy recurse = <RecursiveName>(<dim>, depth - 1)
+    @static norm = LayerNorm(<dim>)
+  graph:
+    in -> match:
+      [*] where depth > 0:
+        Fork() -> (main, skip)
+        main ->
+          norm
+          Linear(<dim>, <dim>)
+          GELU()
+          processed
+        (processed, skip) -> Add() -> recurse -> out
+      [*]:
+        Identity() -> out
+
+# Simple recursive stack (no residual):
+#
+# neuron SimpleStack(<dim>, depth):
+#   in: [*, <dim>]
+#   out: [*, <dim>]
+#   context:
+#     @lazy recurse = SimpleStack(<dim>, depth - 1)
+#   graph:
+#     in -> match:
+#       [*] where depth > 0:
+#         Linear(<dim>, <dim>)
+#         GELU()
+#         recurse
+#         out
+#       [*]:
+#         Identity() -> out
