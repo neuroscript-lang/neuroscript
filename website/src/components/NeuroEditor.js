@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useColorMode } from '@docusaurus/theme-common';
 import init, { compile, analyze, list_neurons } from '@site/static/wasm/neuroscript.js';
-import { STDLIB_BUNDLE } from './StdlibBundle';
 
 // Lazy-load Monaco — if CDN fails, editors fall back to plain textareas
 let Editor;
@@ -93,11 +92,10 @@ export default function NeuroEditor({
     setCompiling(true);
     try {
       const cleanSource = source.replace(/^use .*$/gm, '# $&');
-      const fullSource = STDLIB_BUNDLE + '\n' + cleanSource;
 
       // Auto-detect neuron: list all, pick single neuron automatically
       try {
-        const neuronsJson = list_neurons(fullSource);
+        const neuronsJson = list_neurons(cleanSource);
         const neurons = JSON.parse(neuronsJson);
         setAvailableNeurons(neurons);
         if (!neuronName && neurons.length === 1) {
@@ -107,14 +105,14 @@ export default function NeuroEditor({
         setAvailableNeurons([]);
       }
 
-      const result = compile(fullSource, neuronName || undefined);
+      const result = compile(cleanSource, neuronName || undefined);
       setOutput(result);
       setError('');
 
       // Analysis (tutorial)
       if (feat.analysis) {
         try {
-          const analysisJson = analyze(fullSource);
+          const analysisJson = analyze(cleanSource);
           setAnalysisData(JSON.parse(analysisJson));
         } catch (_) {
           setAnalysisData(null);

@@ -1,8 +1,28 @@
 use crate::interfaces::{Dim, Endpoint, NeuronBody, Program, Shape};
-use crate::{generate_pytorch, parse, validate};
+use crate::{generate_pytorch, parse, stdlib, validate};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
 use wasm_bindgen::prelude::*;
+
+/// Cached parsed stdlib, initialized once per WASM module lifetime.
+static STDLIB_CACHE: OnceLock<Result<Program, String>> = OnceLock::new();
+
+/// Get the cached stdlib program, parsing embedded sources on first call.
+fn get_stdlib() -> Result<&'static Program, String> {
+    let cached = STDLIB_CACHE.get_or_init(|| {
+        stdlib::load_stdlib_embedded()
+            .map_err(|e| format!("Failed to load stdlib: {}", e))
+    });
+    cached.as_ref().map_err(|e| e.clone())
+}
+
+/// Load cached stdlib and merge with user program.
+/// User neurons take precedence over stdlib neurons.
+fn load_and_merge(user_program: Program) -> Result<Program, String> {
+    let stdlib_program = get_stdlib()?;
+    Ok(stdlib::merge_programs(stdlib_program.clone(), user_program))
+}
 
 /// Analysis result for the WASM API
 #[derive(Serialize, Deserialize)]
@@ -55,7 +75,8 @@ pub struct MatchArmInfo {
 
 #[wasm_bindgen]
 pub fn compile(source: &str, neuron_name: Option<String>) -> Result<String, String> {
-    let mut program = parse(source).map_err(|e| format!("{}", e))?;
+    let user_program = parse(source).map_err(|e| format!("{}", e))?;
+    let mut program = load_and_merge(user_program)?;
 
     validate(&mut program).map_err(|errors| {
         errors
@@ -83,7 +104,8 @@ pub fn compile(source: &str, neuron_name: Option<String>) -> Result<String, Stri
 
 #[wasm_bindgen]
 pub fn validate_source(source: &str) -> Result<(), String> {
-    let mut program = parse(source).map_err(|e| format!("{}", e))?;
+    let user_program = parse(source).map_err(|e| format!("{}", e))?;
+    let mut program = load_and_merge(user_program)?;
     validate(&mut program).map_err(|errors| {
         errors
             .iter()
@@ -188,7 +210,8 @@ fn collect_calls(endpoint: &Endpoint, called: &mut HashSet<String>) {
 /// about neurons, shapes, and match expressions
 #[wasm_bindgen]
 pub fn analyze(source: &str) -> Result<String, String> {
-    let mut program = parse(source).map_err(|e| format!("{}", e))?;
+    let user_program = parse(source).map_err(|e| format!("{}", e))?;
+    let mut program = load_and_merge(user_program)?;
 
     validate(&mut program).map_err(|errors| {
         errors
