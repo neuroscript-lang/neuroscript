@@ -83,7 +83,7 @@ export default function NeuroEditor({
   const [copied, setCopied]                   = useState(false);
   const [compiling, setCompiling]             = useState(false);
   const [isMobile, setIsMobile]               = useState(false);
-  const [editorFailed, setEditorFailed]       = useState(false);
+  const [editorFailed, setEditorFailed]       = useState(!Editor);
 
   const compileTimerRef = useRef(null);
 
