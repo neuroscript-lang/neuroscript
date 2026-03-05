@@ -888,9 +888,13 @@ impl ShapeInferenceEngine {
                     })?;
                 }
 
-                // 3. Check for obvious conflicts (e.g. constant vs constant) in the middle?
-                // For MVP, we assume variadics are flexible enough to handle the rest.
-                // TODO: More rigorous overlap check
+                // 3. Middle gap: fixed dims between each variadic and the
+                // prefix/suffix boundaries are absorbed by the other shape's
+                // variadic. Prefix unification already checks dims before
+                // min(pos1, pos2), and suffix unification checks dims after
+                // each variadic's tail. Any remaining fixed dims in the gap
+                // (e.g., [A, C, *y, B] vs [A, *x, B] — C is absorbed by *x)
+                // are unconstrained and valid by construction.
 
                 Ok(())
             }
