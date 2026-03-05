@@ -386,7 +386,11 @@ where
                 }
             }
 
-            // Return ports from first arm (they should be consistent in number)
+            // Validate that all arms produce the same port signature.
+            // Shape compatibility across arms is handled separately by the shape inference pass.
+            check_arm_port_consistency(&all_arm_ports, "match", all_arm_ports.len(), &ctx.neuron.name)?;
+
+            // Safe: empty arms case returns early above
             Ok(all_arm_ports[0].clone())
         }
         Endpoint::If(if_expr) => {
@@ -421,6 +425,12 @@ where
                 }
             }
 
+            // Validate that all branches produce the same port signature.
+            // When else_branch is absent, only if/elif branches are compared — the
+            // missing else is a separate validation concern (exhaustiveness).
+            let num_branches = if_expr.branches.len();
+            check_arm_port_consistency(&all_branch_ports, "if", num_branches, &ctx.neuron.name)?;
+
             Ok(all_branch_ports[0].clone())
         }
         Endpoint::Reshape(reshape) => {
@@ -439,6 +449,43 @@ where
             Ok(vec![])
         }
     }
+}
+
+/// Check that all arms/branches of a match or if expression produce the same port signature.
+/// Compares port count and port names across all arms against the first arm.
+/// Shape compatibility is handled separately by the shape inference pass.
+/// `num_numbered` is how many entries are numbered arms; any entry beyond that is the else branch.
+fn check_arm_port_consistency(
+    all_arm_ports: &[Vec<Port>],
+    expr_kind: &str,
+    num_numbered: usize,
+    context: &str,
+) -> Result<(), Box<ValidationError>> {
+    if all_arm_ports.len() <= 1 {
+        return Ok(());
+    }
+
+    let first = &all_arm_ports[0];
+    let first_names: Vec<String> = first.iter().map(|p| p.name.clone()).collect();
+
+    for (i, arm_ports) in all_arm_ports.iter().enumerate().skip(1) {
+        let arm_names: Vec<String> = arm_ports.iter().map(|p| p.name.clone()).collect();
+
+        if arm_ports.len() != first.len() || arm_names != first_names {
+            let arm_index = if i >= num_numbered { None } else { Some(i + 1) };
+            return Err(Box::new(ValidationError::InconsistentArmPorts {
+                expr_kind: expr_kind.to_string(),
+                arm_index,
+                expected_count: first.len(),
+                got_count: arm_ports.len(),
+                expected_names: first_names,
+                got_names: arm_names,
+                context: context.to_string(),
+            }));
+        }
+    }
+
+    Ok(())
 }
 
 /// Check if two port lists are compatible
